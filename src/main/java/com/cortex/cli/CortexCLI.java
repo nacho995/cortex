@@ -15,7 +15,8 @@ import java.util.List;
         GenerateCommand.class,
         ReviewCommand.class,
         HealthCommand.class,
-        ContextCommand.class
+        ContextCommand.class,
+        CreateCommand.class
     },
     mixinStandardHelpOptions = true
 )
@@ -74,6 +75,7 @@ public class CortexCLI implements Runnable {
         System.out.println("    " + GREEN + "init" + RESET + " /path/to/your/project");
         System.out.println("    " + GREEN + "review" + RESET + " -p /path src/Main.java");
         System.out.println("    " + GREEN + "health" + RESET + " -p /path");
+        System.out.println("    " + GREEN + "create" + RESET + " \"todo app with Spring Boot and PostgreSQL\"");
         System.out.println();
     }
 
@@ -99,6 +101,9 @@ public class CortexCLI implements Runnable {
         System.out.println();
         System.out.println("  " + GREEN + "context" + RESET + " -p /path                Show current project context");
         System.out.println("    " + DIM + "Example: context -p /my-app" + RESET);
+        System.out.println();
+        System.out.println("  " + GREEN + "create" + RESET + " \"description\"           Generate code from a description");
+        System.out.println("    " + DIM + "Example: create \"REST API with Spring Boot and JWT auth\"" + RESET);
         System.out.println();
         System.out.println("  " + YELLOW + "help" + RESET + "                            Show this help");
         System.out.println("  " + YELLOW + "clear" + RESET + "                           Clear the screen");

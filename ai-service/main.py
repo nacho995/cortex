@@ -642,3 +642,80 @@ async def health_check(req: HealthRequest):
             }
 
     return result
+
+
+class CreateRequest(BaseModel):
+    prompt: str
+    context: dict | None = None
+    lang: str = "es"
+
+
+CREATE_SYSTEM = (
+    "You are an expert software engineer and code generator. "
+    "The user will describe what they want to build. Generate complete, working code. "
+    "RULES: "
+    "- Generate ALL files needed for a working project. "
+    "- Output each file with its relative path as a markdown header: ## path/to/File.java "
+    "- Include the full file content in a fenced code block with the correct language tag. "
+    "- Add brief comments explaining key decisions. "
+    "- If the user mentions a framework (Spring Boot, Angular, FastAPI, etc), use it. "
+    "- If no framework is specified, choose the most appropriate one based on the description. "
+    "- Include configuration files (pom.xml, package.json, requirements.txt, etc). "
+    "- Make the code production-ready: proper error handling, validation, clean structure. "
+    "Write in normal sentence case. NEVER use all caps."
+)
+
+
+@app.post("/create")
+async def create_code(req: CreateRequest):
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+    context_block = _build_context_block(req.context)
+    system = CREATE_SYSTEM + (" " + lang_extra if lang_extra else "") + context_block
+
+    user_msg = f"Build this: {req.prompt}"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_msg},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 4000,
+            },
+            timeout=60.0,
+        )
+        if response.status_code == 429:
+            await asyncio.sleep(5)
+            response = await client.post(
+                GROQ_URL,
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": MODEL,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 4000,
+                },
+                timeout=60.0,
+            )
+        response.raise_for_status()
+        data = response.json()
+        code_content = data["choices"][0]["message"]["content"]
+
+    return {"code": code_content}
