@@ -49,6 +49,33 @@ Unlike Cursor, Copilot, or ChatGPT, Cortex doesn't give you a single AI opinion.
 | **Security** | Defense in depth | Attack surface, validation, auth, secrets |
 | **DevOps** | Operations | CI/CD, monitoring, deployment, infra cost |
 
+## Code Engine (Like Cursor, but in your terminal)
+
+Cortex includes an intelligent code editing engine that rivals tools like Cursor:
+
+```bash
+cortex > proyecto mi-app
+cortex [mi-app] > el frontend no conecta con el backend, arreglalo
+
+  Issues detected:
+    ! PORT MISMATCH: .env PORT=5000 but client proxy uses 4000
+    ! BROKEN IMPORT: src/App.jsx imports './api' but file not found
+
+    ~ client/package.json (modified)
+    + client/src/api/index.js (created)
+
+  Build: OK
+  Git: a3f2c1 committed
+```
+
+### What makes it different from Cursor:
+- **Consistency checker**: auto-detects port mismatches, broken imports, URL inconsistencies
+- **Auto-rollback**: if a change introduces syntax errors, it rolls back automatically
+- **Build verification**: runs `npm build` / `mvn compile` after every change
+- **Git integration**: auto-commits successful changes, undo with one command
+- **Dependency graph**: follows imports to send relevant files to the AI
+- **Auto-test generation**: generates tests for any file
+
 ## Commands
 
 ### `cortex init <path>`

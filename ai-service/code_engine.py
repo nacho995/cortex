@@ -474,13 +474,157 @@ async def execute_edit(
             except Exception as e:
                 build_result = str(e)
     
+    # 8. Auto-commit if changes were made and build passed
+    commit_result = None
+    if changes and (build_result == "success" or build_result is None):
+        short_instruction = instruction[:60] + "..." if len(instruction) > 60 else instruction
+        commit_result = git_auto_commit(project_path, short_instruction)
+    
     return {
         "response": response_text,
         "files": [{"path": c["file"], "action": c["action"]} for c in changes],
         "errors": errors,
         "issues_found": issues,
         "build_result": build_result,
+        "commit": commit_result,
     }
+
+
+def git_auto_commit(project_path: str, message: str) -> dict:
+    """Auto-commit changes after successful edits."""
+    try:
+        root = Path(project_path)
+        git_dir = root / ".git"
+        
+        # Init git if not exists
+        if not git_dir.exists():
+            subprocess.run(["git", "init"], cwd=project_path, capture_output=True)
+            subprocess.run(["git", "add", "."], cwd=project_path, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "Initial commit by Cortex"], cwd=project_path, capture_output=True)
+        
+        # Stage and commit
+        subprocess.run(["git", "add", "."], cwd=project_path, capture_output=True)
+        result = subprocess.run(
+            ["git", "commit", "-m", f"cortex: {message}"],
+            cwd=project_path, capture_output=True, text=True,
+        )
+        
+        if result.returncode == 0:
+            # Get short hash
+            hash_result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=project_path, capture_output=True, text=True,
+            )
+            return {"committed": True, "hash": hash_result.stdout.strip(), "message": message}
+        else:
+            return {"committed": False, "reason": "No changes to commit"}
+    except Exception as e:
+        return {"committed": False, "reason": str(e)}
+
+
+def git_diff(project_path: str) -> str:
+    """Show git diff of uncommitted changes."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--stat"],
+            cwd=project_path, capture_output=True, text=True, timeout=10,
+        )
+        return result.stdout if result.stdout else "No changes"
+    except Exception:
+        return "Git not available"
+
+
+def git_log(project_path: str, n: int = 10) -> list[dict]:
+    """Get last N commits."""
+    try:
+        result = subprocess.run(
+            ["git", "log", f"-{n}", "--pretty=format:%h|%s|%cr"],
+            cwd=project_path, capture_output=True, text=True, timeout=10,
+        )
+        commits = []
+        for line in result.stdout.strip().splitlines():
+            parts = line.split("|", 2)
+            if len(parts) == 3:
+                commits.append({"hash": parts[0], "message": parts[1], "time": parts[2]})
+        return commits
+    except Exception:
+        return []
+
+
+def git_undo(project_path: str) -> dict:
+    """Undo the last Cortex commit."""
+    try:
+        # Check if last commit was by cortex
+        result = subprocess.run(
+            ["git", "log", "-1", "--pretty=format:%s"],
+            cwd=project_path, capture_output=True, text=True,
+        )
+        if result.stdout.startswith("cortex:"):
+            subprocess.run(
+                ["git", "reset", "--soft", "HEAD~1"],
+                cwd=project_path, capture_output=True,
+            )
+            subprocess.run(
+                ["git", "checkout", "."],
+                cwd=project_path, capture_output=True,
+            )
+            return {"undone": True, "message": result.stdout}
+        return {"undone": False, "reason": "Last commit was not by Cortex"}
+    except Exception as e:
+        return {"undone": False, "reason": str(e)}
+
+
+async def generate_tests(project_path: str, file_path: str, lang: str = "es") -> dict:
+    """Generate tests for a specific file."""
+    ctx = ProjectContext(project_path)
+    
+    if file_path not in ctx.files:
+        return {"error": f"File not found: {file_path}"}
+    
+    content = ctx.files[file_path]
+    
+    # Determine test framework
+    test_system = (
+        "You are a testing expert. Generate comprehensive tests for the given file. "
+        "RULES: "
+        "- For .js/.jsx: use Jest with React Testing Library if React component "
+        "- For .java: use JUnit 5 with Mockito "
+        "- For .py: use pytest "
+        "- Generate the test file using FILE: format "
+        "- Test all public functions/methods "
+        "- Include edge cases "
+        "- Use descriptive test names "
+    )
+    
+    # Determine test file path
+    if file_path.endswith((".js", ".jsx")):
+        test_path = file_path.replace(".jsx", ".test.jsx").replace(".js", ".test.js")
+    elif file_path.endswith(".java"):
+        test_path = file_path.replace("/main/", "/test/").replace(".java", "Test.java")
+    elif file_path.endswith(".py"):
+        test_path = file_path.replace(".py", "_test.py")
+        if "/" in test_path:
+            parts = test_path.rsplit("/", 1)
+            test_path = parts[0] + "/test_" + parts[1].replace("_test.py", ".py")
+    else:
+        test_path = file_path + ".test"
+    
+    user_msg = f"Generate tests for this file:\n\n--- {file_path} ---\n{content}\n\nSave tests to: {test_path}"
+    
+    route = get_route("add")
+    response = await call_llm(route, test_system, user_msg, temperature=0.2, max_tokens=4096)
+    
+    files = parse_file_blocks(response)
+    
+    # Write test files
+    written = []
+    for f in files:
+        full = Path(project_path) / f["path"]
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(f["content"])
+        written.append(f["path"])
+    
+    return {"tests_generated": written, "response": response}
 
 
 async def execute_shell(project_path: str, command: str) -> dict:

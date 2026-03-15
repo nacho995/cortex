@@ -1405,7 +1405,7 @@ async def chat(req: ChatRequest):
 
 # ============== CODE ENGINE ENDPOINTS ==============
 
-from code_engine import ProjectContext, execute_edit, execute_shell
+from code_engine import ProjectContext, execute_edit, execute_shell, git_auto_commit, git_diff, git_log, git_undo, generate_tests
 
 
 class EditRequest(BaseModel):
@@ -1481,3 +1481,50 @@ async def analyze_project(req: AnalyzeRequest):
         "config": ctx.config,
         "imports": {k: v for k, v in ctx.imports.items() if v},  # Only files with imports
     }
+
+
+# ============== GIT & TEST ENDPOINTS ==============
+
+
+class GitLogRequest(BaseModel):
+    project_path: str
+    n: int = 10
+
+
+@app.post("/git/log")
+async def get_git_log(req: GitLogRequest):
+    return {"commits": git_log(req.project_path, req.n)}
+
+
+@app.post("/git/diff")
+async def get_git_diff(req: GitLogRequest):
+    return {"diff": git_diff(req.project_path)}
+
+
+class GitUndoRequest(BaseModel):
+    project_path: str
+
+
+@app.post("/git/undo")
+async def undo_last(req: GitUndoRequest):
+    return git_undo(req.project_path)
+
+
+class TestRequest(BaseModel):
+    project_path: str
+    file_path: str
+    lang: str = "es"
+    token: str | None = None
+
+
+@app.post("/test/generate")
+async def gen_tests(req: TestRequest):
+    if req.token:
+        user = validate_token(req.token)
+        if user:
+            rate = check_rate_limit(user["id"], user["plan"])
+            if not rate["allowed"]:
+                raise HTTPException(status_code=429, detail="Daily limit reached.")
+            track_usage(user["id"], "test")
+    
+    return await generate_tests(req.project_path, req.file_path, req.lang)

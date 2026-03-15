@@ -363,6 +363,24 @@ public class CortexCLI implements Runnable {
             return new String[]{"usage"};
         }
 
+        // UNDO intent
+        if (lower.matches(".*(undo|deshacer|revertir|rollback|volver atras).*")) {
+            if (detectedPath != null) {
+                return new String[]{"undo", detectedPath};
+            }
+            return null; // Will handle in chat
+        }
+        
+        // GIT LOG intent
+        if (lower.matches(".*(historial|git log|commits|cambios|que hice|que he hecho).*")) {
+            return null; // Handle in chat
+        }
+        
+        // TEST intent
+        if (lower.matches(".*(genera? tests?|crear? tests?|testing|haz tests?).*")) {
+            return null; // Handle in chat
+        }
+
         // Nothing matched - return null (will be ignored)
         return null;
     }
@@ -486,6 +504,15 @@ public class CortexCLI implements Runnable {
                     for (int i = 0; i < Math.min(buildLines.length, 5); i++) {
                         System.out.println("    " + DIM + buildLines[i] + RESET);
                     }
+                }
+            }
+
+            // Show git commit
+            if (json.has("commit") && !json.get("commit").isJsonNull()) {
+                com.google.gson.JsonObject commit = json.getAsJsonObject("commit");
+                if (commit.has("committed") && commit.get("committed").getAsBoolean()) {
+                    String hash = commit.has("hash") ? commit.get("hash").getAsString() : "";
+                    System.out.println("  " + GREEN + "Git: " + hash + " committed" + RESET);
                 }
             }
 
