@@ -387,8 +387,30 @@ public class CortexCLI implements Runnable {
                 
                 fullMessage.append("[Project: ").append(currentProject).append(" | Type: ").append(projectType).append("]\n");
                 
-                // Read actual project files for context
-                fullMessage.append("[Project files:\n");
+                // Build directory tree
+                fullMessage.append("[Project structure:\n");
+                try (java.util.stream.Stream<java.nio.file.Path> treeWalk = java.nio.file.Files.walk(pp, 4)) {
+                    treeWalk.filter(p -> {
+                                String s = p.toString();
+                                return !s.contains("node_modules") && !s.contains(".git") && !s.contains("target") && !s.contains("build/") && !s.contains("dist/");
+                            })
+                            .sorted()
+                            .forEach(p -> {
+                                String rel = pp.relativize(p).toString();
+                                if (rel.isEmpty()) return;
+                                int depth = rel.split("/").length - 1;
+                                String indent = "  ".repeat(depth);
+                                if (java.nio.file.Files.isDirectory(p)) {
+                                    fullMessage.append(indent).append(p.getFileName()).append("/\n");
+                                } else {
+                                    fullMessage.append(indent).append(p.getFileName()).append("\n");
+                                }
+                            });
+                } catch (Exception e) { /* skip */ }
+                fullMessage.append("]\n");
+                
+                // Read key source files content
+                fullMessage.append("[Key file contents:\n");
                 try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(pp, 4)) {
                     walk.filter(java.nio.file.Files::isRegularFile)
                         .filter(p -> {
