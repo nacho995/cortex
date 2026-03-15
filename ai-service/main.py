@@ -752,48 +752,89 @@ async def create_code(req: CreateRequest):
     context_block = _build_context_block(req.context)
     system = CREATE_SYSTEM + (" " + lang_extra if lang_extra else "") + context_block
 
-    user_msg = f"Build this: {req.prompt}"
+    prompt_lower = req.prompt.lower()
+    is_fullstack = any(kw in prompt_lower for kw in [
+        "mern", "mean", "full stack", "fullstack", "full-stack",
+        "frontend y backend", "front y back", "react y node",
+        "react y express", "angular y spring", "vue y express",
+        "next.js", "nuxt",
+    ])
+
+    all_code = ""
 
     async with httpx.AsyncClient() as client:
-        response = await client.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_msg},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 4000,
-            },
-            timeout=60.0,
-        )
-        if response.status_code == 429:
-            await asyncio.sleep(5)
-            response = await client.post(
-                GROQ_URL,
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": MODEL,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user_msg},
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 4000,
-                },
-                timeout=60.0,
-            )
-        response.raise_for_status()
-        data = response.json()
-        code_content = data["choices"][0]["message"]["content"]
+        if is_fullstack:
+            # Split into two calls: backend first, then frontend
+            for part, instruction in [
+                ("BACKEND", f"Build ONLY the BACKEND for: {req.prompt}\nGenerate all server-side files: routes, controllers, models, config, package.json/pom.xml, etc."),
+                ("FRONTEND", f"Build ONLY the FRONTEND for: {req.prompt}\nGenerate all client-side files inside a 'frontend/' directory: components, pages, styles, package.json, index.html, etc. All frontend paths must start with frontend/"),
+            ]:
+                for attempt in range(3):
+                    try:
+                        response = await client.post(
+                            GROQ_URL,
+                            headers={
+                                "Authorization": f"Bearer {GROQ_API_KEY}",
+                                "Content-Type": "application/json",
+                            },
+                            json={
+                                "model": MODEL,
+                                "messages": [
+                                    {"role": "system", "content": system},
+                                    {"role": "user", "content": instruction},
+                                ],
+                                "temperature": 0.3,
+                                "max_tokens": 7000,
+                            },
+                            timeout=60.0,
+                        )
+                        if response.status_code == 429:
+                            await asyncio.sleep((attempt + 1) * 5)
+                            continue
+                        response.raise_for_status()
+                        data = response.json()
+                        all_code += f"\n\n# === {part} ===\n\n"
+                        all_code += data["choices"][0]["message"]["content"]
+                        break
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code == 429 and attempt < 2:
+                            await asyncio.sleep((attempt + 1) * 5)
+                            continue
+                        raise
+                await asyncio.sleep(3)  # Delay between backend and frontend calls
+        else:
+            # Single call for simpler projects
+            for attempt in range(3):
+                try:
+                    response = await client.post(
+                        GROQ_URL,
+                        headers={
+                            "Authorization": f"Bearer {GROQ_API_KEY}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": MODEL,
+                            "messages": [
+                                {"role": "system", "content": system},
+                                {"role": "user", "content": f"Build this: {req.prompt}"},
+                            ],
+                            "temperature": 0.3,
+                            "max_tokens": 7000,
+                        },
+                        timeout=60.0,
+                    )
+                    if response.status_code == 429:
+                        await asyncio.sleep((attempt + 1) * 5)
+                        continue
+                    response.raise_for_status()
+                    data = response.json()
+                    all_code = data["choices"][0]["message"]["content"]
+                    break
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 429 and attempt < 2:
+                        await asyncio.sleep((attempt + 1) * 5)
+                        continue
+                    raise
 
-    parsed_files = _parse_files_from_response(code_content)
-    return {"code": code_content, "files": parsed_files}
+    parsed_files = _parse_files_from_response(all_code)
+    return {"code": all_code, "files": parsed_files}
