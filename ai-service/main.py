@@ -892,10 +892,21 @@ async def create_code(req: CreateRequest):
 
     if is_fullstack:
         # Split into two calls: backend first, then frontend
-        for part, instruction in [
-            ("BACKEND", f"Build ONLY the BACKEND for: {req.prompt}{debate_info}\nGenerate all server-side files: routes, controllers, models, config, package.json/pom.xml, etc."),
-            ("FRONTEND", f"Build ONLY the FRONTEND for: {req.prompt}{debate_info}\nGenerate all client-side files inside a 'frontend/' directory: components, pages, styles, package.json, index.html, etc. All frontend paths must start with frontend/"),
-        ]:
+        # Detect if MERN specifically
+        is_mern = any(kw in prompt_lower for kw in ["mern", "react y node", "react y express", "mongodb"])
+
+        if is_mern:
+            parts = [
+                ("BACKEND", f"Build ONLY the Node.js/Express BACKEND for: {req.prompt}{debate_info}\nYou MUST use: Node.js, Express.js, MongoDB with Mongoose.\nGenerate: package.json, server.js, .env.example, models/*.js, routes/*.js, middleware/*.js, config/*.js.\nAll FILE: paths must NOT start with any prefix, just the file name or folder/file."),
+                ("FRONTEND", f"Build ONLY the React FRONTEND for: {req.prompt}{debate_info}\nYou MUST use: React with modern hooks, CSS with flexbox/grid/animations/gradients for an innovative beautiful design.\nGenerate ALL files with paths starting with client/: client/package.json, client/public/index.html, client/src/App.jsx, client/src/App.css, client/src/components/*.jsx, client/src/index.js, client/src/index.css.\nEvery FILE: path MUST start with client/"),
+            ]
+        else:
+            parts = [
+                ("BACKEND", f"Build ONLY the BACKEND for: {req.prompt}{debate_info}\nGenerate all server-side files: routes, controllers, models, config, package.json/pom.xml, etc."),
+                ("FRONTEND", f"Build ONLY the FRONTEND for: {req.prompt}{debate_info}\nGenerate all client-side files inside a 'client/' directory: components, pages, styles, package.json, index.html, etc. All frontend paths must start with client/"),
+            ]
+
+        for part, instruction in parts:
             try:
                 part_code = await call_llm(route, system, instruction, temperature=0.3, max_tokens=4096)
                 all_code += f"\n\n# === {part} ===\n\n"
