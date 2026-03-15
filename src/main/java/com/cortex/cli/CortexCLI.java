@@ -156,6 +156,11 @@ public class CortexCLI implements Runnable {
         System.out.println("  " + GREEN + "usage" + RESET + "                        Check your usage & plan");
         System.out.println("  " + GREEN + "upgrade" + RESET + "                      View plans & pricing");
         System.out.println();
+        System.out.println("  " + BOLD + CYAN + "Session:" + RESET);
+        System.out.println("  " + GREEN + "proyecto" + RESET + " /path              Set active project for this session");
+        System.out.println("  " + GREEN + "project" + RESET + " /path               Set active project for this session");
+        System.out.println("    " + DIM + "Example: proyecto ~/my-app  (prompt shows [my-app] when set)" + RESET);
+        System.out.println();
         System.out.println("  " + YELLOW + "help" + RESET + "                            Show this help");
         System.out.println("  " + YELLOW + "clear" + RESET + "                           Clear the screen");
         System.out.println("  " + RED + "exit" + RESET + " / " + RED + "quit" + RESET + "                      Exit Cortex");
@@ -195,7 +200,7 @@ public class CortexCLI implements Runnable {
         return args.toArray(new String[0]);
     }
 
-    private String[] interpretNaturalLanguage(String input, String lower) {
+    private String[] interpretNaturalLanguage(String input, String lower, String currentProject) {
         // Extract paths from input
         String detectedPath = null;
         String userHome = System.getProperty("user.home");
@@ -240,8 +245,14 @@ public class CortexCLI implements Runnable {
                 }
             }
         }
+
+        // Fall back to current project if no path detected
+        if (detectedPath == null && currentProject != null) {
+            detectedPath = currentProject;
+        }
+
         // FIX intent: arregla, fix, error, bug, soluciona, repara
-        if (lower.matches(".*(arregla|fix|error|bug|soluciona|repara|corrige|falla|no funciona|no compila).*")) {
+        if (lower.matches(".*(arregla|fix|error|bug|soluciona|repara|corrige|falla|no funciona|no compila|si hay|sigue fallando|sigue sin|todavia|aun no|still).*")) {
             if (detectedPath != null) {
                 return new String[]{"fix", "-p", detectedPath};
             }
@@ -311,9 +322,9 @@ public class CortexCLI implements Runnable {
             return new String[]{"health", "-p", "."};
         }
 
-        // ADD intent: agrega, add, anade, mete, pon
-        if (lower.matches(".*(^agrega |^add |^añade |^mete |^pon ).*")) {
-            String instruction = input.replaceFirst("(?i)^(agrega|add|añade|mete|pon)\\s+(a |al |en )?", "");
+        // ADD intent: agrega, add, anade, mete, pon, mejora, cambia, modifica, actualiza
+        if (lower.matches(".*(^agrega |^add |^añade |^mete |^pon |^mejora |^cambia |^modifica |^actualiza ).*")) {
+            String instruction = input.replaceFirst("(?i)^(agrega|add|añade|mete|pon|mejora|cambia|modifica|actualiza)\\s+(a |al |en |el |la |los |las )?", "");
             if (detectedPath != null) {
                 return new String[]{"add", "-p", detectedPath, instruction};
             }
@@ -358,9 +369,17 @@ public class CortexCLI implements Runnable {
         printWelcome();
 
         Scanner scanner = new Scanner(System.in);
-        String prompt = "  " + BOLD + CYAN + "cortex" + RESET + DIM + " > " + RESET;
+        String currentProject = null;
+        String currentProjectName = null;
 
         while (true) {
+            String prompt;
+            if (currentProjectName != null) {
+                prompt = "  " + BOLD + CYAN + "cortex" + RESET + " " + DIM + "[" + currentProjectName + "]" + RESET + DIM + " > " + RESET;
+            } else {
+                prompt = "  " + BOLD + CYAN + "cortex" + RESET + DIM + " > " + RESET;
+            }
+
             System.out.print(prompt);
             System.out.flush();
 
@@ -402,6 +421,32 @@ public class CortexCLI implements Runnable {
             String lineLower = line.toLowerCase();
             String[] cmdArgs;
 
+            // Set project manually with "proyecto <path>" or "project <path>"
+            if (lineLower.startsWith("proyecto ") || lineLower.startsWith("project ")) {
+                String path = line.substring(line.indexOf(' ') + 1).trim();
+                if (path.startsWith("~")) {
+                    path = System.getProperty("user.home") + path.substring(1);
+                }
+                java.nio.file.Path p = java.nio.file.Path.of(path).toAbsolutePath();
+                if (java.nio.file.Files.isDirectory(p)) {
+                    currentProject = p.toString();
+                    currentProjectName = p.getFileName().toString();
+                    System.out.println("  " + GREEN + "Project set: " + currentProject + RESET);
+                } else {
+                    // Check home dir
+                    p = java.nio.file.Path.of(System.getProperty("user.home"), path).toAbsolutePath();
+                    if (java.nio.file.Files.isDirectory(p)) {
+                        currentProject = p.toString();
+                        currentProjectName = p.getFileName().toString();
+                        System.out.println("  " + GREEN + "Project set: " + currentProject + RESET);
+                    } else {
+                        System.out.println("  " + RED + "Directory not found: " + path + RESET);
+                    }
+                }
+                System.out.println();
+                continue;
+            }
+
             // Check if it's already a valid command
             String[] rawArgs = parseArgs(line);
             if (rawArgs.length == 0) continue;
@@ -417,7 +462,7 @@ public class CortexCLI implements Runnable {
                 cmdArgs = rawArgs;
             } else {
                 // Natural language → detect intent and build command
-                cmdArgs = interpretNaturalLanguage(line, lineLower);
+                cmdArgs = interpretNaturalLanguage(line, lineLower, currentProject);
                 if (cmdArgs == null) {
                     // Truly unrecognized input, ignore silently
                     continue;
@@ -428,6 +473,32 @@ public class CortexCLI implements Runnable {
 
             try {
                 new CommandLine(new CortexCLI()).execute(cmdArgs);
+
+                // Update session project from command args
+                for (int i = 0; i < cmdArgs.length; i++) {
+                    if (("-p".equals(cmdArgs[i]) || "--project".equals(cmdArgs[i])) && i + 1 < cmdArgs.length) {
+                        currentProject = cmdArgs[i + 1];
+                        // Resolve to absolute
+                        if (currentProject.startsWith("~")) {
+                            currentProject = System.getProperty("user.home") + currentProject.substring(1);
+                        }
+                        java.nio.file.Path p = java.nio.file.Path.of(currentProject).toAbsolutePath();
+                        currentProject = p.toString();
+                        currentProjectName = p.getFileName().toString();
+                        break;
+                    }
+                    // Also detect init command (init /path)
+                    if ("init".equals(cmdArgs[0]) && i == 1) {
+                        currentProject = cmdArgs[1];
+                        if (currentProject.startsWith("~")) {
+                            currentProject = System.getProperty("user.home") + currentProject.substring(1);
+                        }
+                        java.nio.file.Path p = java.nio.file.Path.of(currentProject).toAbsolutePath();
+                        currentProject = p.toString();
+                        currentProjectName = p.getFileName().toString();
+                        break;
+                    }
+                }
             } catch (Exception e) {
                 System.out.println("  " + RED + "Error: " + e.getMessage() + RESET);
             }
