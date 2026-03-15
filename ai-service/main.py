@@ -764,22 +764,25 @@ async def create_code(req: CreateRequest):
     # Intelligent routing: detect complexity from prompt
     route = get_route("create", req.prompt)
 
-    if is_fullstack:
-        # Split into two calls: backend first, then frontend
-        for part, instruction in [
-            ("BACKEND", f"Build ONLY the BACKEND for: {req.prompt}{debate_info}\nGenerate all server-side files: routes, controllers, models, config, package.json/pom.xml, etc."),
-            ("FRONTEND", f"Build ONLY the FRONTEND for: {req.prompt}{debate_info}\nGenerate all client-side files inside a 'frontend/' directory: components, pages, styles, package.json, index.html, etc. All frontend paths must start with frontend/"),
-        ]:
-            part_code = await call_llm(route, system, instruction, temperature=0.3, max_tokens=7000)
-            all_code += f"\n\n# === {part} ===\n\n"
-            all_code += part_code
-            await asyncio.sleep(3)  # Delay between backend and frontend calls
-    else:
-        # Single call for simpler projects
-        all_code = await call_llm(
-            route, system, f"Build this: {req.prompt}{debate_info}",
-            temperature=0.3, max_tokens=7000,
-        )
+    try:
+        if is_fullstack:
+            # Split into two calls: backend first, then frontend
+            for part, instruction in [
+                ("BACKEND", f"Build ONLY the BACKEND for: {req.prompt}{debate_info}\nGenerate all server-side files: routes, controllers, models, config, package.json/pom.xml, etc."),
+                ("FRONTEND", f"Build ONLY the FRONTEND for: {req.prompt}{debate_info}\nGenerate all client-side files inside a 'frontend/' directory: components, pages, styles, package.json, index.html, etc. All frontend paths must start with frontend/"),
+            ]:
+                part_code = await call_llm(route, system, instruction, temperature=0.3, max_tokens=4096)
+                all_code += f"\n\n# === {part} ===\n\n"
+                all_code += part_code
+                await asyncio.sleep(3)  # Delay between backend and frontend calls
+        else:
+            # Single call for simpler projects
+            all_code = await call_llm(
+                route, system, f"Build this: {req.prompt}{debate_info}",
+                temperature=0.3, max_tokens=4096,
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {str(e)}")
 
     parsed_files = _parse_files_from_response(all_code)
     return {"code": all_code, "files": parsed_files}
@@ -834,7 +837,10 @@ async def add_to_project(req: AddRequest):
     user_msg = f"Modify this project: {req.instruction}{files_context}"
 
     route = get_route("add")
-    code_content = await call_llm(route, system, user_msg, temperature=0.3, max_tokens=7000)
+    try:
+        code_content = await call_llm(route, system, user_msg, temperature=0.3, max_tokens=4096)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {str(e)}")
 
     parsed_files = _parse_files_from_response(code_content)
     return {"code": code_content, "files": parsed_files}

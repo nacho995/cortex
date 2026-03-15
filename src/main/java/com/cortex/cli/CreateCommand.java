@@ -99,14 +99,42 @@ public class CreateCommand implements Runnable {
                     .build();
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            JsonObject json = gson.fromJson(response.body(), JsonObject.class);
+            String responseBody = response.body();
+            
+            // Check for HTTP errors
+            if (response.statusCode() != 200) {
+                System.out.println("\u001B[91m  Error (" + response.statusCode() + "): " + responseBody + RESET);
+                return;
+            }
 
-            if (!json.has("files")) {
-                // Fallback: show raw code if no files parsed
+            // Try to parse as JSON
+            JsonObject json;
+            try {
+                json = gson.fromJson(responseBody, JsonObject.class);
+            } catch (Exception parseError) {
+                // Not JSON - show raw response
+                System.out.println("\u001B[91m  Error: Unexpected response from server:" + RESET);
+                System.out.println("  " + responseBody.substring(0, Math.min(responseBody.length(), 500)));
+                return;
+            }
+
+            if (json == null) {
+                System.out.println("\u001B[91m  Error: Empty response from server." + RESET);
+                return;
+            }
+
+            // Check for error in response
+            if (json.has("detail")) {
+                System.out.println("\u001B[91m  Error: " + json.get("detail").getAsString() + RESET);
+                return;
+            }
+
+            if (!json.has("files") || json.getAsJsonArray("files").size() == 0) {
+                // No files parsed - show raw code
                 if (json.has("code")) {
                     System.out.println(json.get("code").getAsString());
                 } else {
-                    System.out.println("\u001B[91m  Error: " + response.body() + RESET);
+                    System.out.println("\u001B[91m  Error: No files generated." + RESET);
                 }
                 return;
             }
