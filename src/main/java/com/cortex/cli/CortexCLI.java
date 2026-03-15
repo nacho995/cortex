@@ -251,8 +251,11 @@ public class CortexCLI implements Runnable {
             detectedPath = currentProject;
         }
 
-        // FIX intent: arregla, fix, error, bug, soluciona, repara
-        if (lower.matches(".*(arregla|fix|error|bug|soluciona|repara|corrige|falla|no funciona|no compila|si hay|sigue fallando|sigue sin|todavia|aun no|still).*")) {
+        // Check if it's a runtime description (should go to chat, not fix)
+        boolean isRuntimeDescription = lower.matches(".*(me dice|me sale|me aparece|cuando|en la pagina|al intentar|al hacer|al pulsar|al clickar|el frontend|la app dice|la aplicacion dice|en el navegador|en pantalla).*");
+        
+        // FIX intent: only for actual build/code fix requests, not runtime descriptions
+        if (!isRuntimeDescription && lower.matches(".*(arregla|fix|bug|soluciona|repara|corrige|no compila|si hay errores|sigue fallando|todavia|aun no|still).*")) {
             if (detectedPath != null) {
                 return new String[]{"fix", "-p", detectedPath};
             }
@@ -367,89 +370,59 @@ public class CortexCLI implements Runnable {
     private void handleChat(String message, String currentProject, java.util.List<String> chatHistory) {
         try {
             com.google.gson.Gson gson = new com.google.gson.Gson();
-            java.util.Map<String, Object> bodyMap = new java.util.HashMap<>();
-            bodyMap.put("lang", "es");
-
-            // Build conversation context from history
-            if (!chatHistory.isEmpty()) {
-                String historyText = String.join("\n", chatHistory);
-                bodyMap.put("message", historyText + "\nUser: " + message);
-            } else {
-                bodyMap.put("message", message);
-            }
-
+            StringBuilder fullMessage = new StringBuilder();
+            
+            // Add project context
             if (currentProject != null) {
-                bodyMap.put("project_path", currentProject);
+                String projectType = "unknown";
+                java.nio.file.Path pp = java.nio.file.Path.of(currentProject);
+                if (java.nio.file.Files.exists(pp.resolve("client/package.json")))
+                    projectType = "MERN (Node.js backend + React frontend)";
+                else if (java.nio.file.Files.exists(pp.resolve("package.json")))
+                    projectType = "Node.js";
+                else if (java.nio.file.Files.exists(pp.resolve("pom.xml")))
+                    projectType = "Java/Maven/Spring Boot";
+                else if (java.nio.file.Files.exists(pp.resolve("requirements.txt")))
+                    projectType = "Python";
+                fullMessage.append("[Project: ").append(currentProject).append(" | Type: ").append(projectType).append("]\n");
                 
-                // Read project context
-                java.nio.file.Path contextPath = java.nio.file.Path.of(currentProject, ".architect", "context.json");
-                if (java.nio.file.Files.exists(contextPath)) {
-                    bodyMap.put("context", gson.fromJson(java.nio.file.Files.readString(contextPath), Object.class));
-                }
-
-                // List project files for context
-                java.util.List<java.util.Map<String, String>> filesList = new java.util.ArrayList<>();
-                try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(java.nio.file.Path.of(currentProject), 3)) {
-                    walk.filter(java.nio.file.Files::isRegularFile)
-                        .filter(p -> {
-                            String name = p.getFileName().toString();
-                            return name.endsWith(".js") || name.endsWith(".jsx") || name.endsWith(".css") || name.endsWith(".json") || name.endsWith(".java") || name.endsWith(".py") || name.endsWith(".ts");
-                        })
-                        .filter(p -> !p.toString().contains("node_modules") && !p.toString().contains("target"))
-                        .limit(15)
-                        .forEach(p -> {
-                            java.util.Map<String, String> m = new java.util.HashMap<>();
-                            m.put("path", java.nio.file.Path.of(currentProject).relativize(p).toString());
-                            filesList.add(m);
-                        });
-                } catch (Exception e) { /* skip */ }
-                bodyMap.put("files_context", filesList);
-            }
-
-            // Add project summary to message so AI knows the project type
-            if (currentProject != null) {
-                StringBuilder projectInfo = new StringBuilder();
-                projectInfo.append("\n[Project context: ").append(currentProject).append("]\n");
-                projectInfo.append("[Files in project: ");
-                try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(java.nio.file.Path.of(currentProject), 2)) {
-                    walk.filter(java.nio.file.Files::isRegularFile)
-                        .filter(p -> !p.toString().contains("node_modules") && !p.toString().contains("target") && !p.toString().contains(".git"))
-                        .limit(20)
-                        .forEach(p -> projectInfo.append(java.nio.file.Path.of(currentProject).relativize(p)).append(", "));
-                } catch (Exception e) { /* skip */ }
-                projectInfo.append("]\n");
-                
-                // Check project type
-                if (java.nio.file.Files.exists(java.nio.file.Path.of(currentProject, "package.json"))) {
-                    projectInfo.append("[This is a Node.js project");
-                    if (java.nio.file.Files.exists(java.nio.file.Path.of(currentProject, "client/package.json"))) {
-                        projectInfo.append(" with a React frontend (MERN stack)");
+                // Read key config files for context
+                try {
+                    java.nio.file.Path envFile = pp.resolve(".env");
+                    if (java.nio.file.Files.exists(envFile)) {
+                        fullMessage.append("[.env: ").append(java.nio.file.Files.readString(envFile).replaceAll("\\n", ", ")).append("]\n");
                     }
-                    projectInfo.append("]\n");
-                } else if (java.nio.file.Files.exists(java.nio.file.Path.of(currentProject, "pom.xml"))) {
-                    projectInfo.append("[This is a Java/Maven project]\n");
-                } else if (java.nio.file.Files.exists(java.nio.file.Path.of(currentProject, "requirements.txt"))) {
-                    projectInfo.append("[This is a Python project]\n");
-                }
-                
-                String currentMsg = (String) bodyMap.get("message");
-                bodyMap.put("message", projectInfo.toString() + currentMsg);
+                    java.nio.file.Path serverFile = pp.resolve("server.js");
+                    if (java.nio.file.Files.exists(serverFile)) {
+                        String server = java.nio.file.Files.readString(serverFile);
+                        // Extract port
+                        java.util.regex.Matcher portMatch = java.util.regex.Pattern.compile("PORT.*?(\\d{4})").matcher(server);
+                        if (portMatch.find()) fullMessage.append("[Backend port: ").append(portMatch.group(1)).append("]\n");
+                    }
+                } catch (Exception e) { /* skip */ }
             }
+            
+            // Add last 4 history entries
+            int start = Math.max(0, chatHistory.size() - 4);
+            for (int i = start; i < chatHistory.size(); i++) {
+                fullMessage.append(chatHistory.get(i)).append("\n");
+            }
+            fullMessage.append("User: ").append(message);
 
-            String token = TokenHelper.loadToken();
-            if (token != null) bodyMap.put("token", token);
-
-            String body = gson.toJson(bodyMap);
+            String body = gson.toJson(java.util.Map.of("message", fullMessage.toString(), "lang", "es"));
 
             java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-                    .version(java.net.http.HttpClient.Version.HTTP_1_1).build();
+                    .version(java.net.http.HttpClient.Version.HTTP_1_1)
+                    .connectTimeout(java.time.Duration.ofSeconds(15))
+                    .build();
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create("https://cortex-ai.fly.dev/chat"))
                     .header("Content-Type", "application/json")
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
+                    .timeout(java.time.Duration.ofSeconds(30))
                     .build();
 
-            java.net.http.HttpResponse<String> response = client.send(request, 
+            java.net.http.HttpResponse<String> response = client.send(request,
                     java.net.http.HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() == 200) {
@@ -457,39 +430,19 @@ public class CortexCLI implements Runnable {
                 if (json != null && json.has("response")) {
                     String text = json.get("response").getAsString();
                     System.out.println();
-                    for (String chatLine : text.split("\n")) {
-                        System.out.println("  " + chatLine);
+                    String[] lines = text.split("\n");
+                    for (int i = 0; i < Math.min(lines.length, 30); i++) {
+                        System.out.println("  " + lines[i]);
                     }
-
-                    // Save chat history
                     chatHistory.add("User: " + message);
-                    chatHistory.add("Cortex: " + text);
-                    // Keep last 10 exchanges
-                    while (chatHistory.size() > 20) {
-                        chatHistory.remove(0);
-                    }
-
-                    // If AI generated files and there's a current project, offer to save
-                    if (json.has("files") && json.getAsJsonArray("files").size() > 0 && currentProject != null) {
-                        com.google.gson.JsonArray files = json.getAsJsonArray("files");
-                        System.out.println();
-                        System.out.println("  " + BOLD + GREEN + files.size() + " files generated." + RESET);
-                        for (com.google.gson.JsonElement elem : files) {
-                            com.google.gson.JsonObject file = elem.getAsJsonObject();
-                            String filePath = file.get("path").getAsString();
-                            String content = file.get("content").getAsString();
-                            java.nio.file.Path fullPath = java.nio.file.Path.of(currentProject).resolve(filePath);
-                            java.nio.file.Files.createDirectories(fullPath.getParent());
-                            java.nio.file.Files.writeString(fullPath, content);
-                            System.out.println("    " + GREEN + "+" + RESET + " " + filePath);
-                        }
-                    }
+                    chatHistory.add("Cortex: " + (text.length() > 300 ? text.substring(0, 300) : text));
+                    while (chatHistory.size() > 10) chatHistory.remove(0);
                 }
             } else {
-                System.out.println("  " + DIM + "No pude procesar eso. Intenta con un comando o escribe 'help'." + RESET);
+                System.out.println("  " + DIM + "No pude procesar eso." + RESET);
             }
         } catch (Exception e) {
-            System.out.println("  " + DIM + "No pude conectar al servicio. Intenta con un comando." + RESET);
+            System.out.println("  " + DIM + "Timeout. Intenta de nuevo." + RESET);
         }
     }
 
