@@ -198,26 +198,46 @@ public class CortexCLI implements Runnable {
     private String[] interpretNaturalLanguage(String input, String lower) {
         // Extract paths from input
         String detectedPath = null;
+        String userHome = System.getProperty("user.home");
+        String cwd = System.getProperty("user.dir");
+        
         for (String word : input.split("\\s+")) {
+            // Remove trailing punctuation
+            word = word.replaceAll("[.,;:!?]+$", "");
+            
             // Explicit paths: ~/project, /home/user/project, ./project
             if (word.startsWith("~/") || word.startsWith("/") || word.startsWith("./")) {
                 detectedPath = word;
                 break;
             }
-            // Detect folder names: words with hyphens or dots that look like project names
-            // Check if it exists as a directory in home or current dir
-            if (word.matches("[a-zA-Z][a-zA-Z0-9._-]+") && !word.matches("(el|la|los|las|de|del|en|con|para|una|uno|un|mi|tu|su|al|por|que|como|sobre|si|no|y|o|a)")) {
-                // Check current directory
-                java.nio.file.Path cwdPath = java.nio.file.Path.of(word);
-                if (java.nio.file.Files.isDirectory(cwdPath)) {
-                    detectedPath = word;
-                    break;
-                }
-                // Check home directory
-                java.nio.file.Path homePath = java.nio.file.Path.of(System.getProperty("user.home"), word);
+            
+            // Skip stopwords
+            if (word.toLowerCase().matches("(el|la|los|las|de|del|en|con|para|una|uno|un|mi|tu|su|al|por|que|como|sobre|si|no|y|o|a|es|esta|este|esto)")) {
+                continue;
+            }
+            
+            // Check if word looks like a project name (has hyphen, dot, or is camelCase)
+            if (word.matches("[a-zA-Z][a-zA-Z0-9._-]*") && word.length() > 2) {
+                // Check in home directory first (most common)
+                java.nio.file.Path homePath = java.nio.file.Path.of(userHome, word);
                 if (java.nio.file.Files.isDirectory(homePath)) {
                     detectedPath = homePath.toString();
                     break;
+                }
+                // Check current working directory
+                java.nio.file.Path cwdPath = java.nio.file.Path.of(cwd, word);
+                if (java.nio.file.Files.isDirectory(cwdPath)) {
+                    detectedPath = cwdPath.toString();
+                    break;
+                }
+                // Check parent of cwd
+                java.nio.file.Path parentPath = java.nio.file.Path.of(cwd).getParent();
+                if (parentPath != null) {
+                    java.nio.file.Path siblingPath = parentPath.resolve(word);
+                    if (java.nio.file.Files.isDirectory(siblingPath)) {
+                        detectedPath = siblingPath.toString();
+                        break;
+                    }
                 }
             }
         }
