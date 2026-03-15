@@ -897,8 +897,38 @@ async def create_code(req: CreateRequest):
 
         if is_mern:
             parts = [
-                ("BACKEND", f"Build ONLY the Node.js/Express BACKEND for: {req.prompt}{debate_info}\nYou MUST use: Node.js, Express.js, MongoDB with Mongoose.\nGenerate: package.json, server.js, .env.example, models/*.js, routes/*.js, middleware/*.js, config/*.js.\nAll FILE: paths must NOT start with any prefix, just the file name or folder/file."),
-                ("FRONTEND", f"Build ONLY the React FRONTEND for: {req.prompt}{debate_info}\nYou MUST use: React with modern hooks, CSS with flexbox/grid/animations/gradients for an innovative beautiful design.\nGenerate ALL files with paths starting with client/: client/package.json, client/public/index.html, client/src/App.jsx, client/src/App.css, client/src/components/*.jsx, client/src/index.js, client/src/index.css.\nEvery FILE: path MUST start with client/"),
+                ("BACKEND", (
+                    f"Build ONLY the Node.js/Express/MongoDB BACKEND for: {req.prompt}{debate_info}\n"
+                    "STACK: Node.js + Express.js + MongoDB with Mongoose. NO Java. NO Spring Boot.\n"
+                    "Generate these files:\n"
+                    "FILE: package.json (with express, mongoose, cors, dotenv, bcryptjs, jsonwebtoken dependencies)\n"
+                    "FILE: server.js (Express server with MongoDB connection, CORS, routes)\n"
+                    "FILE: .env.example (MONGO_URI, JWT_SECRET, PORT)\n"
+                    "FILE: config/db.js (MongoDB connection with Mongoose)\n"
+                    "FILE: models/Task.js (Mongoose schema for the main entity)\n"
+                    "FILE: routes/tasks.js (CRUD routes: GET, POST, PUT, DELETE)\n"
+                    "FILE: middleware/auth.js (JWT authentication middleware)\n"
+                    "FILE: routes/auth.js (register, login routes)\n"
+                    "FILE: models/User.js (User schema with bcrypt password hashing)\n"
+                    "Generate COMPLETE working code for each file. Start with FILE: immediately."
+                )),
+                ("FRONTEND", (
+                    f"Build ONLY the React FRONTEND for: {req.prompt}{debate_info}\n"
+                    "STACK: React with modern hooks and beautiful CSS. NO Angular. NO Vue.\n"
+                    "Generate these files (ALL paths MUST start with client/):\n"
+                    "FILE: client/package.json (with react, react-dom, axios, react-router-dom)\n"
+                    "FILE: client/public/index.html\n"
+                    "FILE: client/src/index.js\n"
+                    "FILE: client/src/App.jsx (main app with routing)\n"
+                    "FILE: client/src/App.css (BEAUTIFUL innovative CSS: gradients, shadows, animations, glassmorphism, modern design)\n"
+                    "FILE: client/src/components/TaskList.jsx (displays all tasks)\n"
+                    "FILE: client/src/components/TaskItem.jsx (single task with edit/delete)\n"
+                    "FILE: client/src/components/TaskForm.jsx (add new task form)\n"
+                    "FILE: client/src/components/Login.jsx (login form)\n"
+                    "FILE: client/src/components/Register.jsx (register form)\n"
+                    "FILE: client/src/components/Navbar.jsx (navigation bar)\n"
+                    "Generate COMPLETE working code for each file. The CSS must be SPECTACULAR with modern design. Start with FILE: immediately."
+                )),
             ]
         else:
             parts = [
@@ -908,7 +938,7 @@ async def create_code(req: CreateRequest):
 
         for part, instruction in parts:
             try:
-                part_code = await call_llm(route, system, instruction, temperature=0.3, max_tokens=4096)
+                part_code = await call_llm(route, system, instruction, temperature=0.3, max_tokens=8192)
                 all_code += f"\n\n# === {part} ===\n\n"
                 all_code += part_code
             except Exception as e:
