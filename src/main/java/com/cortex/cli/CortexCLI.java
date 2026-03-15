@@ -364,12 +364,19 @@ public class CortexCLI implements Runnable {
         return null;
     }
 
-    private void handleChat(String message, String currentProject) {
+    private void handleChat(String message, String currentProject, java.util.List<String> chatHistory) {
         try {
             com.google.gson.Gson gson = new com.google.gson.Gson();
             java.util.Map<String, Object> bodyMap = new java.util.HashMap<>();
-            bodyMap.put("message", message);
             bodyMap.put("lang", "es");
+
+            // Build conversation context from history
+            if (!chatHistory.isEmpty()) {
+                String historyText = String.join("\n", chatHistory);
+                bodyMap.put("message", historyText + "\nUser: " + message);
+            } else {
+                bodyMap.put("message", message);
+            }
 
             if (currentProject != null) {
                 bodyMap.put("project_path", currentProject);
@@ -399,6 +406,36 @@ public class CortexCLI implements Runnable {
                 bodyMap.put("files_context", filesList);
             }
 
+            // Add project summary to message so AI knows the project type
+            if (currentProject != null) {
+                StringBuilder projectInfo = new StringBuilder();
+                projectInfo.append("\n[Project context: ").append(currentProject).append("]\n");
+                projectInfo.append("[Files in project: ");
+                try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(java.nio.file.Path.of(currentProject), 2)) {
+                    walk.filter(java.nio.file.Files::isRegularFile)
+                        .filter(p -> !p.toString().contains("node_modules") && !p.toString().contains("target") && !p.toString().contains(".git"))
+                        .limit(20)
+                        .forEach(p -> projectInfo.append(java.nio.file.Path.of(currentProject).relativize(p)).append(", "));
+                } catch (Exception e) { /* skip */ }
+                projectInfo.append("]\n");
+                
+                // Check project type
+                if (java.nio.file.Files.exists(java.nio.file.Path.of(currentProject, "package.json"))) {
+                    projectInfo.append("[This is a Node.js project");
+                    if (java.nio.file.Files.exists(java.nio.file.Path.of(currentProject, "client/package.json"))) {
+                        projectInfo.append(" with a React frontend (MERN stack)");
+                    }
+                    projectInfo.append("]\n");
+                } else if (java.nio.file.Files.exists(java.nio.file.Path.of(currentProject, "pom.xml"))) {
+                    projectInfo.append("[This is a Java/Maven project]\n");
+                } else if (java.nio.file.Files.exists(java.nio.file.Path.of(currentProject, "requirements.txt"))) {
+                    projectInfo.append("[This is a Python project]\n");
+                }
+                
+                String currentMsg = (String) bodyMap.get("message");
+                bodyMap.put("message", projectInfo.toString() + currentMsg);
+            }
+
             String token = TokenHelper.loadToken();
             if (token != null) bodyMap.put("token", token);
 
@@ -422,6 +459,14 @@ public class CortexCLI implements Runnable {
                     System.out.println();
                     for (String chatLine : text.split("\n")) {
                         System.out.println("  " + chatLine);
+                    }
+
+                    // Save chat history
+                    chatHistory.add("User: " + message);
+                    chatHistory.add("Cortex: " + text);
+                    // Keep last 10 exchanges
+                    while (chatHistory.size() > 20) {
+                        chatHistory.remove(0);
                     }
 
                     // If AI generated files and there's a current project, offer to save
@@ -455,6 +500,7 @@ public class CortexCLI implements Runnable {
         Scanner scanner = new Scanner(System.in);
         String currentProject = null;
         String currentProjectName = null;
+        java.util.List<String> chatHistory = new java.util.ArrayList<>();
 
         while (true) {
             String prompt;
@@ -549,7 +595,7 @@ public class CortexCLI implements Runnable {
                 cmdArgs = interpretNaturalLanguage(line, lineLower, currentProject);
                 if (cmdArgs == null) {
                     // Fallback: send to AI chat
-                    handleChat(line, currentProject);
+                    handleChat(line, currentProject, chatHistory);
                     System.out.println();
                     continue;
                 }
