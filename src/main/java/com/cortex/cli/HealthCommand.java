@@ -15,7 +15,7 @@ import com.google.gson.JsonElement;
 
 @Command(name = "health", description = "Analyze project health score")
 public class HealthCommand implements Runnable {
-    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "http://localhost:8000")
+    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "https://cortex-ai.fly.dev")
     private String server;
     @Option(names = {"-p", "--project"}, description = "Path to project root", required = true)
     private String project;

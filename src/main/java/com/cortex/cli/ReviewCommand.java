@@ -17,7 +17,7 @@ import com.google.gson.JsonElement;
 
 @Command(name = "review", description = "Code review with AI agent personas")
 public class ReviewCommand implements Runnable {
-    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "http://localhost:8000")
+    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "https://cortex-ai.fly.dev")
     private String server;
     @Option(names = {"-p", "--project"}, description = "Path to project root", required = true)
     private String project;

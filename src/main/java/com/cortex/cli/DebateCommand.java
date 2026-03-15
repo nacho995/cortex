@@ -26,7 +26,7 @@ public class DebateCommand implements Runnable {
     private int rounds;
     @Option(names = {"--agents"}, description = "Path to custom agents YAML directory")
     private String agentsDir;
-    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "http://localhost:8000")
+    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "https://cortex-ai.fly.dev")
     private String server;
     @Parameters(index = "0", description = "The topic to debate")
     private String topic;

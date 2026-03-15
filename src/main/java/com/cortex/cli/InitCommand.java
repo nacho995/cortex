@@ -13,7 +13,7 @@ import com.google.gson.JsonObject;
 
 @Command(name = "init", description = "Initialize a new project with Cortex")
 public class InitCommand implements Runnable {
-    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "http://localhost:8000")
+    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "https://cortex-ai.fly.dev")
     private String server;
     @Parameters(index = "0", description = "The project path to initialize")
     private String path;

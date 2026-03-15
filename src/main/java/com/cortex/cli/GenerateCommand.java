@@ -14,7 +14,7 @@ import com.google.gson.JsonObject;
 
 @Command(name = "generate", description = "Generate code from an ADR decision")
 public class GenerateCommand implements Runnable {
-    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "http://localhost:8000")
+    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "https://cortex-ai.fly.dev")
     private String server;
     @Option(names = {"-p", "--project"}, description = "Path to project root", required = true)
     private String project;
