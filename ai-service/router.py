@@ -29,10 +29,10 @@ TASK_ROUTING = {
     "review": {"provider": "groq", "model": "llama-3.1-8b-instant"},
     "health": {"provider": "groq", "model": "llama-3.1-8b-instant"},
     "diagram": {"provider": "groq", "model": "llama-3.1-8b-instant"},
-    "create_simple": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
-    "create_complex": {"provider": "anthropic", "model": "claude-opus-4-20250514"},
-    "add": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
-    "generate": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+    "create_simple": {"provider": "google", "model": "gemini-2.5-pro"},
+    "create_complex": {"provider": "google", "model": "gemini-2.5-pro"},
+    "add": {"provider": "google", "model": "gemini-2.5-pro"},
+    "generate": {"provider": "google", "model": "gemini-2.5-pro"},
     "adr": {"provider": "groq", "model": "llama-3.1-8b-instant"},
 }
 
