@@ -104,7 +104,9 @@ public class CortexCLI implements Runnable {
         System.out.println();
         System.out.println("  " + GREEN + "create" + RESET + " \"description\"            Generate project in current dir");
         System.out.println("    " + DIM + "Example: create \"todo app with MERN stack\"" + RESET);
-        System.out.println("    " + DIM + "Example: create -o ~/other-dir \"REST API with FastAPI\"" + RESET);
+        System.out.println("    " + DIM + "Example: create -o ~/dir \"REST API with FastAPI\"" + RESET);
+        System.out.println("    " + DIM + "Pro:     create --provider openai --api-key sk-... \"complex app\"" + RESET);
+        System.out.println("    " + DIM + "After debate: create --from-debate \"implement the decision\"" + RESET);
         System.out.println();
         System.out.println("  " + YELLOW + "help" + RESET + "                            Show this help");
         System.out.println("  " + YELLOW + "clear" + RESET + "                           Clear the screen");

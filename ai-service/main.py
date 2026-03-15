@@ -16,6 +16,9 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "llama-3.1-8b-instant"
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+
 
 def _load_custom_agents(agents_dir: str | None) -> list[dict]:
     """Load custom agent definitions from YAML files in .architect/agents/."""
@@ -649,6 +652,10 @@ class CreateRequest(BaseModel):
     prompt: str
     context: dict | None = None
     lang: str = "es"
+    debate_context: dict | None = None
+    provider: str = "groq"  # "groq" or "openai"
+    model: str | None = None
+    api_key: str | None = None
 
 
 CREATE_SYSTEM = (
@@ -745,8 +752,22 @@ def _parse_files_from_response(content: str) -> list[dict]:
 
 @app.post("/create")
 async def create_code(req: CreateRequest):
-    if not GROQ_API_KEY:
+    if not GROQ_API_KEY and req.provider == "groq" and not req.api_key:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    # Resolve provider
+    if req.provider == "openai":
+        use_url = OPENAI_URL
+        use_key = req.api_key or OPENAI_API_KEY
+        use_model = req.model or "gpt-4o-mini"
+        if not use_key:
+            raise HTTPException(status_code=400, detail="OpenAI API key required. Pass api_key in request or set OPENAI_API_KEY env var.")
+    else:
+        use_url = GROQ_URL
+        use_key = req.api_key or GROQ_API_KEY
+        use_model = req.model or MODEL
+        if not use_key:
+            raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
 
     lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
     context_block = _build_context_block(req.context)
@@ -760,25 +781,38 @@ async def create_code(req: CreateRequest):
         "next.js", "nuxt",
     ])
 
+    debate_info = ""
+    if req.debate_context:
+        rounds = req.debate_context.get("rounds", [])
+        if rounds:
+            debate_info = "\n\nPrevious architecture debate conclusions:\n"
+            last_round = rounds[-1] if rounds else {}
+            for agent in last_round.get("agents", []):
+                debate_info += f"- {agent.get('name', 'Agent')}: {agent.get('argument', '')}\n"
+            consensus = req.debate_context.get("consensus", {})
+            if consensus:
+                debate_info += f"\nConsensus: {consensus.get('level', 'unknown')} ({consensus.get('votes', {})})\n"
+            debate_info += "\nUse these conclusions to guide your implementation.\n"
+
     all_code = ""
 
     async with httpx.AsyncClient() as client:
         if is_fullstack:
             # Split into two calls: backend first, then frontend
             for part, instruction in [
-                ("BACKEND", f"Build ONLY the BACKEND for: {req.prompt}\nGenerate all server-side files: routes, controllers, models, config, package.json/pom.xml, etc."),
-                ("FRONTEND", f"Build ONLY the FRONTEND for: {req.prompt}\nGenerate all client-side files inside a 'frontend/' directory: components, pages, styles, package.json, index.html, etc. All frontend paths must start with frontend/"),
+                ("BACKEND", f"Build ONLY the BACKEND for: {req.prompt}{debate_info}\nGenerate all server-side files: routes, controllers, models, config, package.json/pom.xml, etc."),
+                ("FRONTEND", f"Build ONLY the FRONTEND for: {req.prompt}{debate_info}\nGenerate all client-side files inside a 'frontend/' directory: components, pages, styles, package.json, index.html, etc. All frontend paths must start with frontend/"),
             ]:
                 for attempt in range(3):
                     try:
                         response = await client.post(
-                            GROQ_URL,
+                            use_url,
                             headers={
-                                "Authorization": f"Bearer {GROQ_API_KEY}",
+                                "Authorization": f"Bearer {use_key}",
                                 "Content-Type": "application/json",
                             },
                             json={
-                                "model": MODEL,
+                                "model": use_model,
                                 "messages": [
                                     {"role": "system", "content": system},
                                     {"role": "user", "content": instruction},
@@ -807,16 +841,16 @@ async def create_code(req: CreateRequest):
             for attempt in range(3):
                 try:
                     response = await client.post(
-                        GROQ_URL,
+                        use_url,
                         headers={
-                            "Authorization": f"Bearer {GROQ_API_KEY}",
+                            "Authorization": f"Bearer {use_key}",
                             "Content-Type": "application/json",
                         },
                         json={
-                            "model": MODEL,
+                            "model": use_model,
                             "messages": [
                                 {"role": "system", "content": system},
-                                {"role": "user", "content": f"Build this: {req.prompt}"},
+                                {"role": "user", "content": f"Build this: {req.prompt}{debate_info}"},
                             ],
                             "temperature": 0.3,
                             "max_tokens": 7000,

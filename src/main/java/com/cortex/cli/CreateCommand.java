@@ -25,6 +25,14 @@ public class CreateCommand implements Runnable {
     private String output;
     @Option(names = {"-l", "--lang"}, description = "Language code", defaultValue = "es")
     private String lang;
+    @Option(names = {"--from-debate"}, description = "Use last debate results as context for generation")
+    private boolean fromDebate;
+    @Option(names = {"--provider"}, description = "AI provider: groq (free) or openai (bring your key)", defaultValue = "groq")
+    private String provider;
+    @Option(names = {"--api-key"}, description = "Your API key for the provider (OpenAI, etc)")
+    private String apiKey;
+    @Option(names = {"--model"}, description = "Model to use (e.g. gpt-4o, gpt-4o-mini)")
+    private String model;
     @Parameters(index = "0", description = "What to build (e.g. 'todo app with Spring Boot')")
     private String prompt;
 
@@ -54,6 +62,21 @@ public class CreateCommand implements Runnable {
                     bodyMap.put("context", gson.fromJson(Files.readString(contextPath), Object.class));
                 }
             }
+
+            if (fromDebate) {
+                Path debateFile = Path.of(System.getProperty("user.home"), ".cortex", "last-debate.json");
+                if (Files.exists(debateFile)) {
+                    String debateContent = Files.readString(debateFile);
+                    bodyMap.put("debate_context", gson.fromJson(debateContent, Object.class));
+                    System.out.println(DIM + "  Using last debate as context" + RESET);
+                } else {
+                    System.out.println(YELLOW + "  Warning: No previous debate found. Run 'debate' first." + RESET);
+                }
+            }
+
+            bodyMap.put("provider", provider);
+            if (apiKey != null) bodyMap.put("api_key", apiKey);
+            if (model != null) bodyMap.put("model", model);
 
             String body = gson.toJson(bodyMap);
 

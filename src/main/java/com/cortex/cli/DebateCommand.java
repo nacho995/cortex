@@ -172,6 +172,14 @@ public class DebateCommand implements Runnable {
                 System.out.println();
             }
 
+            // Save debate results for later use with create --from-debate
+            String debateJson = gson.toJson(debateResponse);
+            Path debateFile = Path.of(System.getProperty("user.home"), ".cortex", "last-debate.json");
+            Files.createDirectories(debateFile.getParent());
+            Files.writeString(debateFile, response.body());
+            System.out.println("  " + DIM + "Debate saved. Use 'create --from-debate' to generate code from this debate." + RESET);
+            System.out.println();
+
             // Generate ADR if requested
             if (adr && debateResponse.getRounds() != null) {
                 System.out.println(DIM + "  Generating ADR..." + RESET);
