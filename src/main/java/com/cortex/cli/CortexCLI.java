@@ -200,7 +200,6 @@ public class CortexCLI implements Runnable {
         String detectedPath = null;
         String userHome = System.getProperty("user.home");
         String cwd = System.getProperty("user.dir");
-        
         for (String word : input.split("\\s+")) {
             // Remove trailing punctuation
             word = word.replaceAll("[.,;:!?]+$", "");
@@ -241,7 +240,6 @@ public class CortexCLI implements Runnable {
                 }
             }
         }
-
         // FIX intent: arregla, fix, error, bug, soluciona, repara
         if (lower.matches(".*(arregla|fix|error|bug|soluciona|repara|corrige|falla|no funciona|no compila).*")) {
             if (detectedPath != null) {
