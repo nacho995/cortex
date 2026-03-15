@@ -32,6 +32,8 @@ public class HealthCommand implements Runnable {
             Gson gson = new Gson();
             Map<String, Object> bodyMap = new HashMap<>();
             bodyMap.put("lang", lang);
+            String token = TokenHelper.loadToken();
+            if (token != null) bodyMap.put("token", token);
 
             Path contextPath = Path.of(project, ".architect", "context.json");
             if (Files.exists(contextPath)) {

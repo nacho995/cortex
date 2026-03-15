@@ -3,6 +3,13 @@ primary_region = 'dfw'
 
 [build]
 
+[env]
+  CORTEX_DB_PATH = "/data/cortex.db"
+
+[mounts]
+  source = "cortex_data"
+  destination = "/data"
+
 [http_service]
   internal_port = 8080
   force_https = true

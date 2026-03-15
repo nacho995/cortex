@@ -43,6 +43,8 @@ public class GenerateCommand implements Runnable {
             Map<String, Object> bodyMap = new HashMap<>();
             bodyMap.put("adr", adrContent);
             bodyMap.put("lang", lang);
+            String token = TokenHelper.loadToken();
+            if (token != null) bodyMap.put("token", token);
 
             Path contextPath = Path.of(project, ".architect", "context.json");
             if (Files.exists(contextPath)) {

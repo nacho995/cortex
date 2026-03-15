@@ -81,6 +81,9 @@ public class ReviewCommand implements Runnable {
                 }
             }
 
+            String token = TokenHelper.loadToken();
+            if (token != null) bodyMap.put("token", token);
+
             String body = gson.toJson(bodyMap);
 
             System.out.println();

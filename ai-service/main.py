@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from scanner import scan_project
+from auth import register_user, validate_token, check_rate_limit, track_usage, get_usage_stats, upgrade_plan, PLANS
 
 load_dotenv()
 
@@ -129,6 +130,7 @@ class DebateRequest(BaseModel):
     context: dict | None = None
     rounds: int = 2
     agents_dir: str | None = None
+    token: str | None = None
 
 
 def _build_context_block(context: dict | None) -> str:
@@ -157,6 +159,80 @@ def _build_context_block(context: dict | None) -> str:
     parts.append("--- END PROJECT CONTEXT ---")
 
     return "\n".join(parts)
+
+
+# ============== AUTH & BILLING ENDPOINTS ==============
+
+class RegisterRequest(BaseModel):
+    email: str
+
+
+@app.post("/register")
+def register(req: RegisterRequest):
+    """Register a new user and return their API token."""
+    result = register_user(req.email)
+    return result
+
+
+class UsageRequest(BaseModel):
+    token: str
+
+
+@app.post("/usage")
+def usage(req: UsageRequest):
+    """Get usage stats for a user by token."""
+    return get_usage_stats(req.token)
+
+
+class UpgradeRequest(BaseModel):
+    token: str
+    plan: str
+
+
+@app.post("/upgrade")
+def upgrade(req: UpgradeRequest):
+    """Upgrade user plan after Stripe payment."""
+    return upgrade_plan(req.token, req.plan)
+
+
+def _resolve_user_and_model(token: str | None, endpoint: str) -> tuple[str, str, str]:
+    """Validate token, enforce rate limit, track usage. Returns (url, key, model)."""
+    if not token:
+        # Anonymous/free: use Groq defaults
+        groq_key = GROQ_API_KEY or ""
+        return GROQ_URL, groq_key, MODEL
+
+    user = validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token. Run 'cortex register <email>' to get one.")
+
+    # Check rate limit
+    rate = check_rate_limit(user["id"], user["plan"])
+    if not rate["allowed"]:
+        plan = user["plan"]
+        if plan == "free":
+            raise HTTPException(
+                status_code=429,
+                detail=f"Free plan limit reached ({rate['limit']}/day). Run 'cortex upgrade' for Pro.",
+            )
+        else:
+            raise HTTPException(status_code=429, detail=f"Daily limit reached ({rate['limit']}/day).")
+
+    # Track usage
+    track_usage(user["id"], endpoint)
+
+    # Resolve model by plan
+    plan_info = PLANS.get(user["plan"], PLANS["free"])
+    if plan_info["provider"] == "openai":
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if openai_key:
+            return "https://api.openai.com/v1/chat/completions", openai_key, plan_info["model"]
+
+    groq_key = GROQ_API_KEY or ""
+    return GROQ_URL, groq_key, plan_info["model"]
+
+
+# ============== END AUTH & BILLING ==============
 
 
 async def call_agent(client: httpx.AsyncClient, agent: dict, messages: list[dict], lang: str, context: dict | None = None) -> str:
@@ -205,6 +281,8 @@ async def call_agent(client: httpx.AsyncClient, agent: dict, messages: list[dict
 async def debate(req: DebateRequest):
     if not GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    _resolve_user_and_model(req.token, "debate")
 
     num_rounds = max(1, min(req.rounds, 5))  # clamp between 1-5
     all_rounds = []
@@ -344,6 +422,7 @@ class AdrRequest(BaseModel):
     topic: str
     agents: list[AdrAgent]
     lang: str = "en"
+    token: str | None = None
 
 
 ADR_SYSTEM = (
@@ -365,6 +444,8 @@ ADR_SYSTEM = (
 async def generate_adr(req: AdrRequest):
     if not GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    _resolve_user_and_model(req.token, "generate-adr")
 
     lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
     system = ADR_SYSTEM + (" " + lang_extra if lang_extra else "")
@@ -403,6 +484,7 @@ class GenerateRequest(BaseModel):
     adr: str
     context: dict | None = None
     lang: str = "en"
+    token: str | None = None
 
 
 GENERATE_SYSTEM = (
@@ -424,6 +506,8 @@ GENERATE_SYSTEM = (
 async def generate_code(req: GenerateRequest):
     if not GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    _resolve_user_and_model(req.token, "generate")
 
     lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
     context_block = _build_context_block(req.context)
@@ -462,6 +546,7 @@ class ReviewRequest(BaseModel):
     context: dict | None = None
     lang: str = "en"
     agents_dir: str | None = None
+    token: str | None = None
 
 
 REVIEW_AGENTS = [
@@ -521,6 +606,8 @@ async def review_code(req: ReviewRequest):
     if not GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
 
+    _resolve_user_and_model(req.token, "review")
+
     lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
     context_block = _build_context_block(req.context)
     user_msg = f"Review this file: {req.file_path}\n\n```\n{req.file_content}\n```"
@@ -575,6 +662,7 @@ async def review_code(req: ReviewRequest):
 class HealthRequest(BaseModel):
     context: dict
     lang: str = "en"
+    token: str | None = None
 
 
 HEALTH_SYSTEM = (
@@ -598,6 +686,8 @@ HEALTH_SYSTEM = (
 async def health_check(req: HealthRequest):
     if not GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    _resolve_user_and_model(req.token, "health-check")
 
     import json as json_module
 
@@ -656,6 +746,7 @@ class CreateRequest(BaseModel):
     provider: str = "groq"  # "groq" or "openai"
     model: str | None = None
     api_key: str | None = None
+    token: str | None = None
 
 
 CREATE_SYSTEM = (
@@ -754,6 +845,11 @@ def _parse_files_from_response(content: str) -> list[dict]:
 async def create_code(req: CreateRequest):
     if not GROQ_API_KEY and req.provider == "groq" and not req.api_key:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    if req.token and not req.api_key:
+        use_url, use_key, use_model = _resolve_user_and_model(req.token, "create")
+    else:
+        _resolve_user_and_model(req.token, "create") if req.token else None
 
     # Resolve provider
     if req.provider == "openai":

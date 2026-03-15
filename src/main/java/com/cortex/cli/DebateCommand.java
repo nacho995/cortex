@@ -71,6 +71,8 @@ public class DebateCommand implements Runnable {
             bodyMap.put("topic", topic);
             bodyMap.put("lang", lang);
             bodyMap.put("rounds", rounds);
+            String token = TokenHelper.loadToken();
+            if (token != null) bodyMap.put("token", token);
             if (project != null) {
                 Path contextPath = Path.of(project, ".architect", "context.json");
                 if (Files.exists(contextPath)) {

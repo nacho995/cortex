@@ -8,6 +8,8 @@ import java.net.URI;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
@@ -22,11 +24,18 @@ public class InitCommand implements Runnable {
     public void run() {
         System.out.println("Initializing project: " + path);
         try {
+            Gson gson = new Gson();
+            Map<String, Object> bodyMap = new HashMap<>();
+            bodyMap.put("path", path);
+            String token = TokenHelper.loadToken();
+            if (token != null) bodyMap.put("token", token);
+            String body = gson.toJson(bodyMap);
+
             HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(server + "/init"))
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(String.format("{\"path\": \"%s\"}", path)))
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -34,7 +43,7 @@ public class InitCommand implements Runnable {
             Files.createDirectories(architectDir);
             Files.writeString(architectDir.resolve("context.json"), response.body());
 
-            JsonObject json = new Gson().fromJson(response.body(), JsonObject.class);
+            JsonObject json = gson.fromJson(response.body(), JsonObject.class);
             System.out.println("\u001B[32m" + "Project initialized at: " + architectDir + "\u001B[0m");
             if (json.has("message")) {
                 System.out.println(json.get("message").getAsString());

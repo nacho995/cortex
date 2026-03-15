@@ -13,10 +13,14 @@ import java.util.List;
         DebateCommand.class,
         InitCommand.class,
         GenerateCommand.class,
+        CreateCommand.class,
         ReviewCommand.class,
         HealthCommand.class,
         ContextCommand.class,
-        CreateCommand.class
+        RegisterCommand.class,
+        LoginCommand.class,
+        UsageCommand.class,
+        UpgradeCommand.class
     },
     mixinStandardHelpOptions = true
 )
@@ -77,6 +81,10 @@ public class CortexCLI implements Runnable {
         System.out.println("    " + GREEN + "health" + RESET + " -p /path");
         System.out.println("    " + GREEN + "create" + RESET + " \"todo app with Spring Boot and PostgreSQL\"");
         System.out.println();
+        System.out.println("  " + DIM + "Account:" + RESET);
+        System.out.println("    " + GREEN + "register" + RESET + " your@email.com");
+        System.out.println("    " + GREEN + "usage" + RESET + "                    " + DIM + "check your plan & usage" + RESET);
+        System.out.println("    " + GREEN + "upgrade" + RESET + "                  " + DIM + "see Pro & Enterprise plans" + RESET);
     }
 
     private void printHelp() {
@@ -107,6 +115,12 @@ public class CortexCLI implements Runnable {
         System.out.println("    " + DIM + "Example: create -o ~/dir \"REST API with FastAPI\"" + RESET);
         System.out.println("    " + DIM + "Pro:     create --provider openai --api-key sk-... \"complex app\"" + RESET);
         System.out.println("    " + DIM + "After debate: create --from-debate \"implement the decision\"" + RESET);
+        System.out.println();
+        System.out.println("  " + BOLD + CYAN + "Account:" + RESET);
+        System.out.println("  " + GREEN + "register" + RESET + " <email>             Create account & get token");
+        System.out.println("  " + GREEN + "login" + RESET + " <token>                Save token from another device");
+        System.out.println("  " + GREEN + "usage" + RESET + "                        Check your usage & plan");
+        System.out.println("  " + GREEN + "upgrade" + RESET + "                      View plans & pricing");
         System.out.println();
         System.out.println("  " + YELLOW + "help" + RESET + "                            Show this help");
         System.out.println("  " + YELLOW + "clear" + RESET + "                           Clear the screen");

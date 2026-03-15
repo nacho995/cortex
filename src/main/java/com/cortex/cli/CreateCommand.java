@@ -77,6 +77,8 @@ public class CreateCommand implements Runnable {
             bodyMap.put("provider", provider);
             if (apiKey != null) bodyMap.put("api_key", apiKey);
             if (model != null) bodyMap.put("model", model);
+            String token = TokenHelper.loadToken();
+            if (token != null) bodyMap.put("token", token);
 
             String body = gson.toJson(bodyMap);
 
