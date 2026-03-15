@@ -22,7 +22,7 @@ public class DebateCommand implements Runnable {
     private String project;
     @Option(names = {"--adr"}, description = "Generate an ADR from the debate")
     private boolean adr;
-    @Option(names = {"-r", "--rounds"}, description = "Number of debate rounds (1-5)", defaultValue = "3")
+    @Option(names = {"-r", "--rounds"}, description = "Number of debate rounds (1-5)", defaultValue = "2")
     private int rounds;
     @Option(names = {"--agents"}, description = "Path to custom agents YAML directory")
     private String agentsDir;

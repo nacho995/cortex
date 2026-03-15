@@ -123,7 +123,7 @@ class DebateRequest(BaseModel):
     topic: str
     lang: str = "en"
     context: dict | None = None
-    rounds: int = 3
+    rounds: int = 2
     agents_dir: str | None = None
 
 
@@ -156,30 +156,45 @@ def _build_context_block(context: dict | None) -> str:
 
 
 async def call_agent(client: httpx.AsyncClient, agent: dict, messages: list[dict], lang: str, context: dict | None = None) -> str:
-    """Call Groq API for a single agent with given messages."""
+    """Call Groq API for a single agent with retry on rate limit."""
     lang_extra = LANG_INSTRUCTION.get(lang, f"You MUST respond entirely in the language with code '{lang}'.")
     context_block = _build_context_block(context)
     system_prompt = agent["system"] + (" " + lang_extra if lang_extra else "") + context_block
 
     all_messages = [{"role": "system", "content": system_prompt}] + messages
 
-    response = await client.post(
-        GROQ_URL,
-        headers={
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": MODEL,
-            "messages": all_messages,
-            "temperature": 0.8,
-            "max_tokens": 300,
-        },
-        timeout=30.0,
-    )
-    response.raise_for_status()
-    data = response.json()
-    return data["choices"][0]["message"]["content"]
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = await client.post(
+                GROQ_URL,
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": MODEL,
+                    "messages": all_messages,
+                    "temperature": 0.8,
+                    "max_tokens": 300,
+                },
+                timeout=30.0,
+            )
+            if response.status_code == 429:
+                wait_time = (attempt + 1) * 5  # 5s, 10s, 15s
+                await asyncio.sleep(wait_time)
+                continue
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 5
+                await asyncio.sleep(wait_time)
+                continue
+            raise
+
+    raise Exception("Rate limited after all retries")
 
 
 @app.post("/debate")
@@ -236,7 +251,7 @@ async def debate(req: DebateRequest):
                         "role": agent["role"],
                         "argument": f"Agent failed: {str(e)}",
                     })
-                await asyncio.sleep(1.0)  # Avoid Groq rate limits
+                await asyncio.sleep(2.0)  # Avoid Groq rate limits
 
             # Build debate history for next round
             round_text = f"\n--- Round {round_num} ---\n"
@@ -548,7 +563,7 @@ async def review_code(req: ReviewRequest):
                     "role": agent["role"],
                     "review": f"Review failed: {str(e)}",
                 })
-            await asyncio.sleep(1.0)  # Avoid Groq rate limits
+            await asyncio.sleep(2.0)  # Avoid Groq rate limits
 
     return {"file": req.file_path, "reviews": reviews}
 
