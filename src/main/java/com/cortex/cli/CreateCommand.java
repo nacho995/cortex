@@ -59,6 +59,13 @@ public class CreateCommand implements Runnable {
                 // Remove common filler words
                 folderName = folderName.replaceAll("^(haz-una-|hacer-una-|create-a-|build-a-|make-a-)", "");
                 if (folderName.isEmpty()) folderName = "cortex-project";
+                // If folder exists, append number
+                String baseName = folderName;
+                int counter = 2;
+                while (java.nio.file.Files.isDirectory(java.nio.file.Path.of(folderName))) {
+                    folderName = baseName + "-" + counter;
+                    counter++;
+                }
                 resolvedOutput = folderName;
             } else {
                 resolvedOutput = output.startsWith("~")
