@@ -196,12 +196,29 @@ public class CortexCLI implements Runnable {
     }
 
     private String[] interpretNaturalLanguage(String input, String lower) {
-        // Extract paths from input (anything starting with ~/ or / or ./)
+        // Extract paths from input
         String detectedPath = null;
         for (String word : input.split("\\s+")) {
+            // Explicit paths: ~/project, /home/user/project, ./project
             if (word.startsWith("~/") || word.startsWith("/") || word.startsWith("./")) {
                 detectedPath = word;
                 break;
+            }
+            // Detect folder names: words with hyphens or dots that look like project names
+            // Check if it exists as a directory in home or current dir
+            if (word.matches("[a-zA-Z][a-zA-Z0-9._-]+") && !word.matches("(el|la|los|las|de|del|en|con|para|una|uno|un|mi|tu|su|al|por|que|como|sobre|si|no|y|o|a)")) {
+                // Check current directory
+                java.nio.file.Path cwdPath = java.nio.file.Path.of(word);
+                if (java.nio.file.Files.isDirectory(cwdPath)) {
+                    detectedPath = word;
+                    break;
+                }
+                // Check home directory
+                java.nio.file.Path homePath = java.nio.file.Path.of(System.getProperty("user.home"), word);
+                if (java.nio.file.Files.isDirectory(homePath)) {
+                    detectedPath = homePath.toString();
+                    break;
+                }
             }
         }
 
@@ -387,6 +404,8 @@ public class CortexCLI implements Runnable {
                     // Truly unrecognized input, ignore silently
                     continue;
                 }
+                // Show interpreted command
+                System.out.println("  " + DIM + "→ " + String.join(" ", cmdArgs) + RESET);
             }
 
             try {
