@@ -538,7 +538,11 @@ public class CortexCLI implements Runnable {
                                 boolean existed = java.nio.file.Files.exists(fullPath);
                                 java.nio.file.Files.createDirectories(fullPath.getParent());
                                 java.nio.file.Files.writeString(fullPath, content);
-                                if (existed) {
+                                // Validate the written file
+                                String lintError = LintHelper.validate(fullPath);
+                                if (lintError != null) {
+                                    System.out.println("    \u001B[91m!\u001B[0m " + filePath + " \u001B[91m" + lintError + "\u001B[0m");
+                                } else if (existed) {
                                     System.out.println("    " + YELLOW + "~" + RESET + " " + filePath + DIM + " (modified)" + RESET);
                                     modified++;
                                 } else {

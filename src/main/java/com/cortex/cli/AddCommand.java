@@ -161,6 +161,10 @@ public class AddCommand implements Runnable {
 
                 Files.createDirectories(fullPath.getParent());
                 Files.writeString(fullPath, content);
+                String lintError = LintHelper.validate(fullPath);
+                if (lintError != null) {
+                    System.out.println("    \u001B[91m!\u001B[0m " + filePath + " \u001B[91m" + lintError + "\u001B[0m");
+                }
 
                 if (exists) {
                     System.out.println("    " + YELLOW + "~" + RESET + " " + filePath + DIM + " (modified)" + RESET);

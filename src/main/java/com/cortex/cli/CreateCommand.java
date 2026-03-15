@@ -200,6 +200,10 @@ public class CreateCommand implements Runnable {
                 Path fullPath = outputDir.resolve(filePath);
                 Files.createDirectories(fullPath.getParent());
                 Files.writeString(fullPath, content);
+                String lintError = LintHelper.validate(fullPath);
+                if (lintError != null) {
+                    System.out.println("    \u001B[91m!\u001B[0m " + filePath + " \u001B[91m" + lintError + "\u001B[0m");
+                }
 
                 System.out.println("    " + GREEN + "+" + RESET + " " + filePath);
                 count++;
