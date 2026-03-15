@@ -1395,7 +1395,7 @@ async def chat(req: ChatRequest):
     route = get_route("chat")  # Use Claude for intelligent chat
 
     try:
-        response_text = await call_llm(route, system, req.message, temperature=0.3, max_tokens=2000)
+        response_text = await call_llm(route, system, req.message, temperature=0.3, max_tokens=4096)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Chat failed: {str(e)}")
 

@@ -370,79 +370,132 @@ public class CortexCLI implements Runnable {
     private void handleChat(String message, String currentProject, java.util.List<String> chatHistory) {
         try {
             com.google.gson.Gson gson = new com.google.gson.Gson();
-            StringBuilder fullMessage = new StringBuilder();
             
-            // Add project context with actual file contents
-            if (currentProject != null) {
-                java.nio.file.Path pp = java.nio.file.Path.of(currentProject);
-                String projectType = "unknown";
-                if (java.nio.file.Files.exists(pp.resolve("client/package.json")))
-                    projectType = "MERN (Node.js backend + React frontend)";
-                else if (java.nio.file.Files.exists(pp.resolve("package.json")))
-                    projectType = "Node.js";
-                else if (java.nio.file.Files.exists(pp.resolve("pom.xml")))
-                    projectType = "Java/Maven";
-                else if (java.nio.file.Files.exists(pp.resolve("requirements.txt")))
-                    projectType = "Python";
-                
-                fullMessage.append("[Project: ").append(currentProject).append(" | Type: ").append(projectType).append("]\n");
-                
-                // Build directory tree
-                fullMessage.append("[Project structure:\n");
-                try (java.util.stream.Stream<java.nio.file.Path> treeWalk = java.nio.file.Files.walk(pp, 4)) {
-                    treeWalk.filter(p -> {
-                                String s = p.toString();
-                                return !s.contains("node_modules") && !s.contains(".git") && !s.contains("target") && !s.contains("build/") && !s.contains("dist/");
-                            })
-                            .sorted()
-                            .forEach(p -> {
-                                String rel = pp.relativize(p).toString();
-                                if (rel.isEmpty()) return;
-                                int depth = rel.split("/").length - 1;
-                                String indent = "  ".repeat(depth);
-                                if (java.nio.file.Files.isDirectory(p)) {
-                                    fullMessage.append(indent).append(p.getFileName()).append("/\n");
-                                } else {
-                                    fullMessage.append(indent).append(p.getFileName()).append("\n");
-                                }
-                            });
-                } catch (Exception e) { /* skip */ }
-                fullMessage.append("]\n");
-                
-                // Read key source files content
-                fullMessage.append("[Key file contents:\n");
-                try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(pp, 4)) {
-                    walk.filter(java.nio.file.Files::isRegularFile)
-                        .filter(p -> {
-                            String s = p.toString();
-                            return !s.contains("node_modules") && !s.contains(".git") && !s.contains("target") && !s.contains("build") && !s.contains("dist");
-                        })
-                        .filter(p -> {
-                            String name = p.getFileName().toString();
-                            return name.endsWith(".js") || name.endsWith(".jsx") || name.endsWith(".css") || name.endsWith(".json") || name.endsWith(".java") || name.endsWith(".py") || name.endsWith(".ts") || name.endsWith(".env") || name.endsWith(".html");
-                        })
-                        .limit(15)
-                        .forEach(p -> {
-                            try {
-                                String relPath = pp.relativize(p).toString();
-                                String content = java.nio.file.Files.readString(p);
-                                if (content.length() > 500) content = content.substring(0, 500) + "...";
-                                fullMessage.append("--- ").append(relPath).append(" ---\n").append(content).append("\n");
-                            } catch (Exception e) { /* skip */ }
-                        });
-                } catch (Exception e) { /* skip */ }
-                fullMessage.append("]\n");
+            if (currentProject == null) {
+                System.out.println("  " + DIM + "No hay proyecto activo. Usa 'proyecto <nombre>' primero." + RESET);
+                return;
             }
             
-            // Add last 4 history entries
-            int start = Math.max(0, chatHistory.size() - 4);
-            for (int i = start; i < chatHistory.size(); i++) {
+            java.nio.file.Path pp = java.nio.file.Path.of(currentProject);
+            
+            // Detect if user wants to run a command
+            String msgLower = message.toLowerCase();
+            if (msgLower.matches(".*(arranca|ejecuta|corre|run|start|inicia|lanza|npm|node|mvn|python).*") && !msgLower.contains("crea") && !msgLower.contains("cambia")) {
+                handleRunCommand(message, currentProject);
+                return;
+            }
+            
+            // Build context: directory tree + FULL relevant files
+            StringBuilder context = new StringBuilder();
+            
+            // 1. Project type
+            String projectType = "unknown";
+            if (java.nio.file.Files.exists(pp.resolve("client/package.json"))) projectType = "MERN";
+            else if (java.nio.file.Files.exists(pp.resolve("package.json"))) projectType = "Node.js";
+            else if (java.nio.file.Files.exists(pp.resolve("pom.xml"))) projectType = "Java/Spring Boot";
+            else if (java.nio.file.Files.exists(pp.resolve("requirements.txt"))) projectType = "Python";
+            context.append("[Type: ").append(projectType).append("]\n");
+            
+            // 2. Directory tree
+            context.append("[Structure:\n");
+            try (java.util.stream.Stream<java.nio.file.Path> tree = java.nio.file.Files.walk(pp, 4)) {
+                tree.filter(p -> {
+                        String s = p.toString();
+                        return !s.contains("node_modules") && !s.contains(".git") && !s.contains("/build/") && !s.contains("/dist/");
+                    })
+                    .sorted()
+                    .forEach(p -> {
+                        String rel = pp.relativize(p).toString();
+                        if (rel.isEmpty()) return;
+                        int depth = rel.split("/").length - 1;
+                        String indent = "  ".repeat(depth);
+                        String name = p.getFileName().toString();
+                        if (java.nio.file.Files.isDirectory(p)) context.append(indent).append(name).append("/\n");
+                        else context.append(indent).append(name).append("\n");
+                    });
+            } catch (Exception e) { /* skip */ }
+            context.append("]\n");
+            
+            // 3. Smart file selection: find files relevant to the user's message
+            java.util.List<java.nio.file.Path> relevantFiles = new java.util.ArrayList<>();
+            
+            // Extract keywords from message to find relevant files
+            String[] keywords = message.toLowerCase()
+                .replaceAll("[^a-z0-9\\s/.]", "")
+                .split("\\s+");
+            
+            try (java.util.stream.Stream<java.nio.file.Path> allFiles = java.nio.file.Files.walk(pp, 5)) {
+                java.util.List<java.nio.file.Path> sourceFiles = allFiles
+                    .filter(java.nio.file.Files::isRegularFile)
+                    .filter(p -> {
+                        String s = p.toString();
+                        return !s.contains("node_modules") && !s.contains(".git") && !s.contains("/build/") && !s.contains("/dist/") && !s.contains("package-lock");
+                    })
+                    .filter(p -> {
+                        String name = p.getFileName().toString();
+                        return name.endsWith(".js") || name.endsWith(".jsx") || name.endsWith(".ts") || name.endsWith(".tsx") || name.endsWith(".css") || name.endsWith(".json") || name.endsWith(".java") || name.endsWith(".py") || name.endsWith(".html") || name.endsWith(".env");
+                    })
+                    .collect(java.util.stream.Collectors.toList());
+                
+                // Score files by relevance to message
+                for (java.nio.file.Path f : sourceFiles) {
+                    String relPath = pp.relativize(f).toString().toLowerCase();
+                    String fileName = f.getFileName().toString().toLowerCase();
+                    int score = 0;
+                    
+                    for (String kw : keywords) {
+                        if (kw.length() < 3) continue;
+                        if (relPath.contains(kw)) score += 3;
+                        if (fileName.contains(kw)) score += 5;
+                        // Check file content for keyword
+                        try {
+                            String content = java.nio.file.Files.readString(f);
+                            if (content.toLowerCase().contains(kw)) score += 1;
+                        } catch (Exception e) { /* skip */ }
+                    }
+                    
+                    // Always include key config files
+                    if (fileName.equals("package.json") || fileName.equals(".env") || fileName.equals("server.js") || fileName.equals("app.jsx") || fileName.equals("app.js")) {
+                        score += 10;
+                    }
+                    
+                    if (score > 0) relevantFiles.add(f);
+                }
+                
+                // Sort by relevance (most relevant first) and take top 10
+                // If no relevant files found, take the first 10 source files
+                if (relevantFiles.isEmpty()) {
+                    relevantFiles.addAll(sourceFiles.subList(0, Math.min(sourceFiles.size(), 10)));
+                } else if (relevantFiles.size() > 10) {
+                    relevantFiles = relevantFiles.subList(0, 10);
+                }
+            } catch (Exception e) { /* skip */ }
+            
+            // 4. Read FULL content of relevant files
+            context.append("[Files:\n");
+            for (java.nio.file.Path f : relevantFiles) {
+                try {
+                    String relPath = pp.relativize(f).toString();
+                    String content = java.nio.file.Files.readString(f);
+                    // Send FULL content, only truncate if > 3000 chars
+                    if (content.length() > 3000) content = content.substring(0, 3000) + "\n... (truncated, " + content.length() + " chars total)";
+                    context.append("--- ").append(relPath).append(" ---\n").append(content).append("\n\n");
+                } catch (Exception e) { /* skip */ }
+            }
+            context.append("]\n");
+            
+            // 5. Build message with history
+            StringBuilder fullMessage = new StringBuilder();
+            fullMessage.append(context);
+            int histStart = Math.max(0, chatHistory.size() - 6);
+            for (int i = histStart; i < chatHistory.size(); i++) {
                 fullMessage.append(chatHistory.get(i)).append("\n");
             }
             fullMessage.append("User: ").append(message);
-
+            
+            // 6. Send to AI
             String body = gson.toJson(java.util.Map.of("message", fullMessage.toString(), "lang", "es"));
-
+            
             java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
                     .version(java.net.http.HttpClient.Version.HTTP_1_1)
                     .connectTimeout(java.time.Duration.ofSeconds(15))
@@ -451,53 +504,114 @@ public class CortexCLI implements Runnable {
                     .uri(java.net.URI.create("https://cortex-ai.fly.dev/chat"))
                     .header("Content-Type", "application/json")
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
-                    .timeout(java.time.Duration.ofSeconds(30))
+                    .timeout(java.time.Duration.ofSeconds(60))
                     .build();
-
+            
+            System.out.println("  " + DIM + "Pensando..." + RESET);
+            
             java.net.http.HttpResponse<String> response = client.send(request,
                     java.net.http.HttpResponse.BodyHandlers.ofString());
-
+            
             if (response.statusCode() == 200) {
                 com.google.gson.JsonObject json = gson.fromJson(response.body(), com.google.gson.JsonObject.class);
                 if (json != null && json.has("response")) {
                     String text = json.get("response").getAsString();
                     System.out.println();
+                    
+                    // Print response (limit 40 lines)
                     String[] lines = text.split("\n");
-                    for (int i = 0; i < Math.min(lines.length, 30); i++) {
+                    for (int i = 0; i < Math.min(lines.length, 40); i++) {
                         System.out.println("  " + lines[i]);
                     }
-
-                    // If AI generated files, write them to project
-                    if (json.has("files") && currentProject != null) {
+                    
+                    // Write files if AI generated FILE: blocks
+                    if (json.has("files") && json.getAsJsonArray("files") != null) {
                         com.google.gson.JsonArray files = json.getAsJsonArray("files");
-                        if (files != null && files.size() > 0) {
+                        if (files.size() > 0) {
                             System.out.println();
+                            int created = 0, modified = 0;
                             for (com.google.gson.JsonElement elem : files) {
                                 com.google.gson.JsonObject file = elem.getAsJsonObject();
                                 String filePath = file.get("path").getAsString();
                                 String content = file.get("content").getAsString();
-                                java.nio.file.Path fullPath = java.nio.file.Path.of(currentProject).resolve(filePath);
+                                java.nio.file.Path fullPath = pp.resolve(filePath);
                                 boolean existed = java.nio.file.Files.exists(fullPath);
                                 java.nio.file.Files.createDirectories(fullPath.getParent());
                                 java.nio.file.Files.writeString(fullPath, content);
                                 if (existed) {
                                     System.out.println("    " + YELLOW + "~" + RESET + " " + filePath + DIM + " (modified)" + RESET);
+                                    modified++;
                                 } else {
                                     System.out.println("    " + GREEN + "+" + RESET + " " + filePath + DIM + " (created)" + RESET);
+                                    created++;
                                 }
                             }
+                            System.out.println("  " + DIM + created + " created, " + modified + " modified" + RESET);
                         }
                     }
-
+                    
+                    // Save history
                     chatHistory.add("User: " + message);
-                    chatHistory.add("Cortex: " + (text.length() > 300 ? text.substring(0, 300) : text));
-                    while (chatHistory.size() > 10) chatHistory.remove(0);
+                    chatHistory.add("Cortex: " + (text.length() > 500 ? text.substring(0, 500) : text));
+                    while (chatHistory.size() > 12) chatHistory.remove(0);
                 }
             } else {
-                System.out.println("  " + DIM + "No pude procesar eso." + RESET);
+                System.out.println("  " + DIM + "Error del servidor. Intenta de nuevo." + RESET);
             }
-        } catch (Exception e) {
+        } catch (java.net.http.HttpTimeoutException e) {
             System.out.println("  " + DIM + "Timeout. Intenta de nuevo." + RESET);
+        } catch (Exception e) {
+            System.out.println("  " + DIM + "Error: " + e.getMessage() + RESET);
+        }
+    }
+    
+    private void handleRunCommand(String message, String currentProject) {
+        try {
+            java.nio.file.Path pp = java.nio.file.Path.of(currentProject);
+            String projectType = "unknown";
+            if (java.nio.file.Files.exists(pp.resolve("client/package.json"))) projectType = "MERN";
+            else if (java.nio.file.Files.exists(pp.resolve("package.json"))) projectType = "Node.js";
+            else if (java.nio.file.Files.exists(pp.resolve("pom.xml"))) projectType = "Java";
+            else if (java.nio.file.Files.exists(pp.resolve("requirements.txt"))) projectType = "Python";
+            
+            System.out.println();
+            switch (projectType) {
+                case "MERN" -> {
+                    // Check .env for port
+                    String port = "5000";
+                    java.nio.file.Path envFile = pp.resolve(".env");
+                    if (java.nio.file.Files.exists(envFile)) {
+                        for (String line : java.nio.file.Files.readAllLines(envFile)) {
+                            if (line.startsWith("PORT=")) port = line.split("=")[1].trim();
+                        }
+                    }
+                    System.out.println("  " + BOLD + CYAN + "Para arrancar tu proyecto MERN:" + RESET);
+                    System.out.println();
+                    System.out.println("  " + GREEN + "1." + RESET + " MongoDB (si no esta corriendo):");
+                    System.out.println("     " + DIM + "docker start mongodb" + RESET);
+                    System.out.println();
+                    System.out.println("  " + GREEN + "2." + RESET + " Backend (terminal 1):");
+                    System.out.println("     " + BOLD + "cd " + currentProject + " && npm run dev" + RESET);
+                    System.out.println("     " + DIM + "→ http://localhost:" + port + RESET);
+                    System.out.println();
+                    System.out.println("  " + GREEN + "3." + RESET + " Frontend (terminal 2):");
+                    System.out.println("     " + BOLD + "cd " + currentProject + "/client && npm start" + RESET);
+                    System.out.println("     " + DIM + "→ http://localhost:3000" + RESET);
+                }
+                case "Node.js" -> {
+                    System.out.println("  " + BOLD + "cd " + currentProject + " && npm run dev" + RESET);
+                }
+                case "Java" -> {
+                    System.out.println("  " + BOLD + "cd " + currentProject + " && mvn spring-boot:run" + RESET);
+                }
+                case "Python" -> {
+                    System.out.println("  " + BOLD + "cd " + currentProject + " && uvicorn main:app --reload" + RESET);
+                }
+                default -> System.out.println("  " + DIM + "No se como arrancar este tipo de proyecto." + RESET);
+            }
+            System.out.println();
+        } catch (Exception e) {
+            System.out.println("  " + DIM + "Error: " + e.getMessage() + RESET);
         }
     }
 
