@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import yaml
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -672,34 +673,67 @@ CREATE_SYSTEM = (
 
 
 def _parse_files_from_response(content: str) -> list[dict]:
-    """Parse FILE: path markers and code blocks from AI response."""
+    """Parse file paths and code blocks from AI response. Handles multiple formats."""
     files = []
     lines = content.split("\n")
     current_path = None
     current_code = []
     in_code_block = False
 
+    # Patterns that indicate a file path
+    file_patterns = [
+        re.compile(r"^FILE:\s*(.+)$", re.IGNORECASE),
+        re.compile(r"^#{1,4}\s+`?([^\s`]+\.[a-zA-Z]+)`?\s*$"),
+        re.compile(r"^#{1,4}\s+`?([^\s`]+/[^\s`]+)`?\s*$"),
+        re.compile(r"^\*\*([^\s*]+\.[a-zA-Z]+)\*\*\s*$"),
+        re.compile(r"^\*\*([^\s*]+/[^\s*]+)\*\*\s*$"),
+        re.compile(r"^`([^\s`]+\.[a-zA-Z]+)`\s*$"),
+        re.compile(r"^`([^\s`]+/[^\s`]+)`\s*$"),
+    ]
+
+    def extract_path(line: str) -> str | None:
+        stripped = line.strip()
+        for pattern in file_patterns:
+            match = pattern.match(stripped)
+            if match:
+                path = match.group(1).strip()
+                # Filter out non-path things
+                if any(path.endswith(ext) for ext in [
+                    ".java", ".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css",
+                    ".json", ".xml", ".yml", ".yaml", ".toml", ".md", ".txt",
+                    ".properties", ".cfg", ".conf", ".sh", ".bat", ".sql",
+                    ".env", ".gitignore", ".dockerignore",
+                    "Dockerfile", "Makefile", "Procfile",
+                ]) or "/" in path:
+                    return path
+        return None
+
     for line in lines:
         stripped = line.strip()
-        
-        if stripped.startswith("FILE:"):
-            # Save previous file if any
+
+        if stripped.startswith("```") and not in_code_block:
+            in_code_block = True
+            continue
+        elif stripped == "```" and in_code_block:
+            in_code_block = False
+            continue
+        elif in_code_block:
+            current_code.append(line)
+            continue
+
+        # Try to detect a file path
+        path = extract_path(stripped)
+        if path:
+            # Save previous file
             if current_path and current_code:
                 files.append({
                     "path": current_path,
                     "content": "\n".join(current_code).strip(),
                 })
-            current_path = stripped[5:].strip()
+            current_path = path
             current_code = []
-            in_code_block = False
-        elif stripped.startswith("```") and not in_code_block:
-            in_code_block = True
-        elif stripped == "```" and in_code_block:
-            in_code_block = False
-        elif in_code_block:
-            current_code.append(line)
 
-    # Don't forget the last file
+    # Last file
     if current_path and current_code:
         files.append({
             "path": current_path,

@@ -38,6 +38,11 @@ public class CreateCommand implements Runnable {
     @Override
     public void run() {
         try {
+            // Resolve ~ to home directory
+            String resolvedOutput = output.startsWith("~")
+                ? System.getProperty("user.home") + output.substring(1)
+                : output;
+
             Gson gson = new Gson();
             Map<String, Object> bodyMap = new HashMap<>();
             bodyMap.put("prompt", prompt);
@@ -55,7 +60,7 @@ public class CreateCommand implements Runnable {
             System.out.println();
             System.out.println(BOLD + CYAN + "  CORTEX CREATE" + RESET);
             System.out.println(DIM + "  Prompt: " + prompt + RESET);
-            System.out.println(DIM + "  Output: " + output + RESET);
+            System.out.println(DIM + "  Output: " + resolvedOutput + RESET);
             System.out.println(DIM + "  Generating project..." + RESET);
             System.out.println();
 
@@ -82,7 +87,7 @@ public class CreateCommand implements Runnable {
             }
 
             JsonArray files = json.getAsJsonArray("files");
-            Path outputDir = Path.of(output);
+            Path outputDir = Path.of(resolvedOutput);
             Files.createDirectories(outputDir);
 
             int count = 0;
