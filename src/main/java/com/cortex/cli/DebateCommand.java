@@ -192,10 +192,12 @@ public class DebateCommand implements Runnable {
                             System.out.println();
                         }
                         case "done" -> {
-                            // Save debate for --from-debate
+                            // Build complete debate JSON for --from-debate
+                            String savedTopic = event.has("topic") ? event.get("topic").getAsString() : topic;
+                            String saveJson = gson.toJson(java.util.Map.of("topic", savedTopic));
                             Path debateFile = Path.of(System.getProperty("user.home"), ".cortex", "last-debate.json");
                             Files.createDirectories(debateFile.getParent());
-                            Files.writeString(debateFile, data);
+                            Files.writeString(debateFile, saveJson);
                             System.out.println("  " + DIM + "Debate saved. Use 'create --from-debate' to generate code." + RESET);
                             System.out.println();
                         }

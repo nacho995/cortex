@@ -69,14 +69,27 @@ public class CreateCommand implements Runnable {
                     String debateContent = Files.readString(debateFile);
                     bodyMap.put("debate_context", gson.fromJson(debateContent, Object.class));
                     System.out.println(DIM + "  Using last debate as context" + RESET);
+
+                    // Extract topic from debate to use as prompt if none provided
+                    if (prompt.isEmpty()) {
+                        try {
+                            com.google.gson.JsonObject debateJson = gson.fromJson(debateContent, com.google.gson.JsonObject.class);
+                            if (debateJson.has("topic")) {
+                                prompt = debateJson.get("topic").getAsString();
+                                System.out.println(DIM + "  Topic from debate: " + prompt + RESET);
+                            } else {
+                                prompt = "Implement the project based on the debate conclusions";
+                            }
+                        } catch (Exception e) {
+                            prompt = "Implement the project based on the debate conclusions";
+                        }
+                    }
                 } else {
                     System.out.println(YELLOW + "  Warning: No previous debate found. Run 'debate' first." + RESET);
                 }
             }
 
-            if (prompt.isEmpty() && fromDebate) {
-                prompt = "Implement the project based on the debate conclusions";
-            } else if (prompt.isEmpty()) {
+            if (prompt.isEmpty() && !fromDebate) {
                 System.out.println("\u001B[91m  Error: Provide a description. Example: create \"todo app with MERN\"" + RESET);
                 return;
             }
