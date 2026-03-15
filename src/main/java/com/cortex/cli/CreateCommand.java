@@ -46,10 +46,25 @@ public class CreateCommand implements Runnable {
     @Override
     public void run() {
         try {
-            // Resolve ~ to home directory
-            String resolvedOutput = output.startsWith("~")
-                ? System.getProperty("user.home") + output.substring(1)
-                : output;
+            // Resolve output directory
+            String resolvedOutput;
+            if (output.equals(".")) {
+                // Auto-generate folder name from prompt
+                String folderName = prompt.toLowerCase()
+                    .replaceAll("[^a-z0-9\\s]", "")
+                    .trim()
+                    .replaceAll("\\s+", "-");
+                // Trim to reasonable length
+                if (folderName.length() > 40) folderName = folderName.substring(0, 40);
+                // Remove common filler words
+                folderName = folderName.replaceAll("^(haz-una-|hacer-una-|create-a-|build-a-|make-a-)", "");
+                if (folderName.isEmpty()) folderName = "cortex-project";
+                resolvedOutput = folderName;
+            } else {
+                resolvedOutput = output.startsWith("~")
+                    ? System.getProperty("user.home") + output.substring(1)
+                    : output;
+            }
 
             Gson gson = new Gson();
             Map<String, Object> bodyMap = new HashMap<>();
@@ -182,6 +197,7 @@ public class CreateCommand implements Runnable {
 
             System.out.println();
             System.out.println("  " + BOLD + count + " files created" + RESET + " in " + CYAN + outputDir.toAbsolutePath() + RESET);
+            System.out.println("  " + DIM + "cd " + outputDir + " to open your project" + RESET);
             System.out.println();
 
             // Show tree structure
