@@ -6,6 +6,8 @@ import picocli.CommandLine.Parameters;
 import java.net.http.*;
 import java.net.URI;
 import java.io.IOException;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.*;
@@ -14,7 +16,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 
-@Command(name = "fix", description = "Fix errors by pasting the error message")
+@Command(name = "fix", description = "Auto-detect and fix project errors")
 public class FixCommand implements Runnable {
     @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "https://cortex-ai.fly.dev")
     private String server;
@@ -22,8 +24,10 @@ public class FixCommand implements Runnable {
     private String project;
     @Option(names = {"-l", "--lang"}, description = "Language code", defaultValue = "es")
     private String lang;
-    @Parameters(index = "0", description = "The error message to fix")
-    private String error;
+    @Option(names = {"--file"}, description = "Read errors from a file")
+    private String errorFile;
+    @Parameters(index = "0", defaultValue = "", description = "Error description (optional, auto-detects if empty)")
+    private String errorMsg;
 
     private static final String RESET = "\u001B[0m";
     private static final String DIM = "\u001B[2m";
@@ -44,6 +48,49 @@ public class FixCommand implements Runnable {
         ".venv", "venv", ".idea", ".vscode", ".architect", "coverage", ".next"
     );
 
+    private String detectProjectType(Path projectPath) {
+        if (Files.exists(projectPath.resolve("package.json"))) return "node";
+        if (Files.exists(projectPath.resolve("pom.xml"))) return "maven";
+        if (Files.exists(projectPath.resolve("build.gradle"))) return "gradle";
+        if (Files.exists(projectPath.resolve("requirements.txt"))) return "python";
+        return "unknown";
+    }
+
+    private String runBuildAndCaptureErrors(Path projectPath, String projectType) {
+        try {
+            String[] cmd;
+            switch (projectType) {
+                case "node" -> {
+                    // Check if client/package.json exists (React project)
+                    if (Files.exists(projectPath.resolve("client/package.json"))) {
+                        cmd = new String[]{"bash", "-c", "cd " + projectPath + "/client && npx react-scripts build 2>&1 | tail -50"};
+                    } else {
+                        cmd = new String[]{"bash", "-c", "cd " + projectPath + " && node --check server.js 2>&1; npm run build 2>&1 | tail -50"};
+                    }
+                }
+                case "maven" -> cmd = new String[]{"bash", "-c", "cd " + projectPath + " && mvn compile 2>&1 | tail -50"};
+                case "python" -> cmd = new String[]{"bash", "-c", "cd " + projectPath + " && python -m py_compile *.py 2>&1 | tail -50"};
+                default -> { return "Could not detect project type for auto-build"; }
+            }
+
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+            process.waitFor();
+            return output.toString();
+        } catch (Exception e) {
+            return "Build failed: " + e.getMessage();
+        }
+    }
+
     @Override
     public void run() {
         try {
@@ -55,17 +102,49 @@ public class FixCommand implements Runnable {
             System.out.println();
             System.out.println(BOLD + RED + "  CORTEX FIX" + RESET);
             System.out.println(DIM + "  Project: " + projectPath + RESET);
-            System.out.println(DIM + "  Analyzing error..." + RESET);
+
+            // Determine error source
+            String error;
+            if (errorFile != null) {
+                // Read from file
+                Path errPath = projectPath.resolve(errorFile);
+                if (!Files.exists(errPath)) errPath = Path.of(errorFile);
+                error = Files.readString(errPath);
+                System.out.println(DIM + "  Errors from: " + errorFile + RESET);
+            } else if (!errorMsg.isEmpty()) {
+                // Use provided message
+                error = errorMsg;
+                System.out.println(DIM + "  Error: " + errorMsg.substring(0, Math.min(errorMsg.length(), 80)) + RESET);
+            } else {
+                // Auto-detect: run build and capture errors
+                String projectType = detectProjectType(projectPath);
+                System.out.println(DIM + "  Detected: " + projectType + " project" + RESET);
+                System.out.println(DIM + "  Running build to detect errors..." + RESET);
+                error = runBuildAndCaptureErrors(projectPath, projectType);
+                
+                if (error.trim().isEmpty() || (!error.contains("Error") && !error.contains("error") && !error.contains("ERROR") && !error.contains("failed"))) {
+                    System.out.println();
+                    System.out.println("  " + GREEN + "No errors detected! Project builds successfully." + RESET);
+                    System.out.println();
+                    return;
+                }
+            }
+
             System.out.println();
 
-            // Show the error
-            System.out.println("  " + RED + "Error:" + RESET);
-            for (String line : error.split("\n")) {
-                System.out.println("  " + DIM + line + RESET);
+            // Show detected errors (truncated)
+            String[] errorLines = error.split("\n");
+            int showLines = Math.min(errorLines.length, 10);
+            System.out.println("  " + RED + "Errors found:" + RESET);
+            for (int i = 0; i < showLines; i++) {
+                System.out.println("  " + DIM + errorLines[i] + RESET);
+            }
+            if (errorLines.length > showLines) {
+                System.out.println("  " + DIM + "... (" + (errorLines.length - showLines) + " more lines)" + RESET);
             }
             System.out.println();
 
-            // Scan project files for context
+            // Scan project files
             List<Map<String, String>> filesContext = new ArrayList<>();
             if (Files.isDirectory(projectPath)) {
                 try (Stream<Path> walk = Files.walk(projectPath, 4)) {
@@ -82,7 +161,7 @@ public class FixCommand implements Runnable {
                         .forEach(p -> {
                             try {
                                 String content = Files.readString(p);
-                                if (content.length() > 3000) content = content.substring(0, 3000) + "\n... (truncated)";
+                                if (content.length() > 3000) content = content.substring(0, 3000) + "\n...";
                                 Map<String, String> fileMap = new HashMap<>();
                                 fileMap.put("path", projectPath.relativize(p).toString());
                                 fileMap.put("content", content);
@@ -92,8 +171,7 @@ public class FixCommand implements Runnable {
                 }
             }
 
-            System.out.println(DIM + "  Read " + filesContext.size() + " project files for context" + RESET);
-            System.out.println(DIM + "  Fixing..." + RESET);
+            System.out.println(DIM + "  Read " + filesContext.size() + " files | Fixing..." + RESET);
             System.out.println();
 
             Gson gson = new Gson();
@@ -129,9 +207,11 @@ public class FixCommand implements Runnable {
                 return;
             }
 
-            if (json == null || !json.has("files")) {
+            if (json == null || !json.has("files") || json.getAsJsonArray("files").size() == 0) {
                 if (json != null && json.has("code")) {
                     System.out.println(json.get("code").getAsString());
+                } else {
+                    System.out.println(RED + "  Could not generate fixes." + RESET);
                 }
                 return;
             }
