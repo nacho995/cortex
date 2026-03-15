@@ -65,7 +65,29 @@ public class FixCommand implements Runnable {
             String[] cmd;
             switch (projectType) {
                 case "node" -> {
-                    // Check if client/package.json exists (React project)
+                    // Auto-install dependencies if node_modules missing
+                    Path nodeModules = projectPath.resolve("node_modules");
+                    Path clientNodeModules = projectPath.resolve("client/node_modules");
+
+                    if (!Files.isDirectory(nodeModules)) {
+                        System.out.println("    " + DIM + "Installing backend dependencies..." + RESET);
+                        try {
+                            Process install = new ProcessBuilder("bash", "-c", "cd " + projectPath + " && npm install 2>&1")
+                                .redirectErrorStream(true).start();
+                            install.waitFor();
+                        } catch (Exception e) { /* continue */ }
+                    }
+
+                    if (Files.exists(projectPath.resolve("client/package.json")) && !Files.isDirectory(clientNodeModules)) {
+                        System.out.println("    " + DIM + "Installing frontend dependencies..." + RESET);
+                        try {
+                            Process install = new ProcessBuilder("bash", "-c", "cd " + projectPath + "/client && npm install 2>&1")
+                                .redirectErrorStream(true).start();
+                            install.waitFor();
+                        } catch (Exception e) { /* continue */ }
+                    }
+
+                    // Run build
                     if (Files.exists(projectPath.resolve("client/package.json"))) {
                         cmd = new String[]{"bash", "-c", "cd " + projectPath + "/client && npx react-scripts build 2>&1 | tail -50"};
                     } else {
