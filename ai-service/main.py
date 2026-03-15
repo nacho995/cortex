@@ -1,0 +1,629 @@
+import asyncio
+import os
+import yaml
+import httpx
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from dotenv import load_dotenv
+from scanner import scan_project
+
+load_dotenv()
+
+app = FastAPI(title="Cortex AI Service")
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL = "llama-3.1-8b-instant"
+
+
+def _load_custom_agents(agents_dir: str | None) -> list[dict]:
+    """Load custom agent definitions from YAML files in .architect/agents/."""
+    if not agents_dir:
+        return []
+
+    from pathlib import Path
+    agents_path = Path(agents_dir)
+    if not agents_path.is_dir():
+        return []
+
+    custom = []
+    for yml_file in sorted(agents_path.glob("*.yaml")) + sorted(agents_path.glob("*.yml")):
+        try:
+            data = yaml.safe_load(yml_file.read_text())
+            if data and isinstance(data, dict) and "name" in data and "personality" in data:
+                custom.append({
+                    "name": data["name"],
+                    "role": data.get("role", data["name"].lower().replace(" ", "-")),
+                    "system": (
+                        data["personality"] + " "
+                        "Write in normal sentence case. NEVER use all caps. "
+                        "Keep your response under 150 words."
+                    ),
+                    "color": data.get("color", "#FFFFFF"),
+                })
+        except Exception:
+            continue
+
+    return custom
+
+
+AGENTS = [
+    {
+        "name": "Architect",
+        "role": "architect",
+        "system": (
+            "You are the Architect agent. You think in terms of design patterns, "
+            "scalability, separation of concerns, and long-term maintainability. "
+            "You favor clean architecture, SOLID principles, and well-defined abstractions. "
+            "You push back on shortcuts that create coupling or technical debt. "
+            "Be opinionated and specific. Give concrete pattern recommendations. "
+            "Write in normal sentence case. NEVER use all caps. "
+            "Keep your response under 150 words."
+        ),
+    },
+    {
+        "name": "Pragmatic",
+        "role": "pragmatic",
+        "system": (
+            "You are the Pragmatic agent. You prioritize shipping working software fast. "
+            "You believe over-engineering kills more projects than technical debt. "
+            "You favor the simplest solution that works, MVPs, iterating based on real data, "
+            "and refactoring only when proven necessary. You challenge unnecessary abstractions. "
+            "You are skeptical of 'future-proofing' and prefer YAGNI. "
+            "Be direct, challenge over-engineering, give real-world tradeoffs. "
+            "Write in normal sentence case. NEVER use all caps. "
+            "Keep your response under 150 words."
+        ),
+    },
+    {
+        "name": "Security",
+        "role": "security",
+        "system": (
+            "You are the Security agent. You evaluate every decision through the lens of "
+            "attack surface, threat modeling, and defense in depth. You care about input validation, "
+            "authentication, authorization, secrets management, and data protection. "
+            "You identify risks others overlook and propose concrete mitigations. "
+            "You are not paranoid but methodical. You demand security is built in, not bolted on. "
+            "Be specific about threats and countermeasures. "
+            "Write in normal sentence case. NEVER use all caps. "
+            "Keep your response under 150 words."
+        ),
+    },
+    {
+        "name": "DevOps",
+        "role": "devops",
+        "system": (
+            "You are the DevOps agent. You think about deployment, CI/CD pipelines, "
+            "observability, monitoring, infrastructure cost, and operational complexity. "
+            "You care about how things run in production, not just how they look in dev. "
+            "You push for containerization, health checks, logging, and automation. "
+            "You challenge decisions that are easy to build but hard to operate. "
+            "Be practical about infrastructure tradeoffs and operational cost. "
+            "Write in normal sentence case. NEVER use all caps. "
+            "Keep your response under 150 words."
+        ),
+    },
+]
+
+
+LANG_INSTRUCTION = {
+    "en": "",
+    "es": "You MUST respond entirely in Spanish.",
+    "fr": "You MUST respond entirely in French.",
+    "pt": "You MUST respond entirely in Portuguese.",
+    "de": "You MUST respond entirely in German.",
+    "it": "You MUST respond entirely in Italian.",
+    "ja": "You MUST respond entirely in Japanese.",
+    "zh": "You MUST respond entirely in Chinese.",
+    "ko": "You MUST respond entirely in Korean.",
+}
+
+
+class DebateRequest(BaseModel):
+    topic: str
+    lang: str = "en"
+    context: dict | None = None
+    rounds: int = 3
+    agents_dir: str | None = None
+
+
+def _build_context_block(context: dict | None) -> str:
+    """Format project context into a readable block for the system prompt."""
+    if not context:
+        return ""
+
+    parts = ["\n\n--- PROJECT CONTEXT (base your answer on this real project) ---"]
+    if context.get("project_name"):
+        parts.append(f"Project: {context['project_name']}")
+    if context.get("languages"):
+        parts.append(f"Languages: {', '.join(context['languages'])}")
+    if context.get("frameworks"):
+        parts.append(f"Frameworks: {', '.join(context['frameworks'])}")
+    if context.get("build_tools"):
+        parts.append(f"Build tools: {', '.join(context['build_tools'])}")
+    if context.get("infrastructure"):
+        parts.append(f"Infrastructure: {', '.join(context['infrastructure'])}")
+    if context.get("dependencies"):
+        for tool, deps in context["dependencies"].items():
+            parts.append(f"Dependencies ({tool}): {', '.join(deps[:15])}")
+    if context.get("entry_points"):
+        parts.append(f"Entry points: {', '.join(context['entry_points'])}")
+    if context.get("structure"):
+        parts.append("Structure:\n" + "\n".join(context["structure"][:30]))
+    parts.append("--- END PROJECT CONTEXT ---")
+
+    return "\n".join(parts)
+
+
+async def call_agent(client: httpx.AsyncClient, agent: dict, messages: list[dict], lang: str, context: dict | None = None) -> str:
+    """Call Groq API for a single agent with given messages."""
+    lang_extra = LANG_INSTRUCTION.get(lang, f"You MUST respond entirely in the language with code '{lang}'.")
+    context_block = _build_context_block(context)
+    system_prompt = agent["system"] + (" " + lang_extra if lang_extra else "") + context_block
+
+    all_messages = [{"role": "system", "content": system_prompt}] + messages
+
+    response = await client.post(
+        GROQ_URL,
+        headers={
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": MODEL,
+            "messages": all_messages,
+            "temperature": 0.8,
+            "max_tokens": 300,
+        },
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data["choices"][0]["message"]["content"]
+
+
+@app.post("/debate")
+async def debate(req: DebateRequest):
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    num_rounds = max(1, min(req.rounds, 5))  # clamp between 1-5
+    all_rounds = []
+
+    # Use custom agents if provided, otherwise default
+    active_agents = AGENTS
+    custom = _load_custom_agents(req.agents_dir)
+    if custom:
+        active_agents = AGENTS + custom
+
+    async with httpx.AsyncClient() as client:
+        debate_history = ""
+
+        for round_num in range(1, num_rounds + 1):
+            round_results = []
+
+            if round_num == 1:
+                round_instruction = f"Debate this topic: {req.topic}"
+            elif round_num < num_rounds:
+                round_instruction = (
+                    f"This is round {round_num} of the debate on: {req.topic}\n\n"
+                    f"Here are the arguments from the previous round(s):\n{debate_history}\n\n"
+                    "Now respond to the other agents' arguments. Challenge weak points, "
+                    "acknowledge good arguments, and refine your position. "
+                    "Address other agents by name when responding to them."
+                )
+            else:
+                round_instruction = (
+                    f"This is the FINAL round of the debate on: {req.topic}\n\n"
+                    f"Here is the full debate so far:\n{debate_history}\n\n"
+                    "Give your final verdict. You MUST start your response with exactly one of these words: "
+                    "APPROVE, REJECT, or CONDITIONAL. Then explain your final position in 2-3 sentences. "
+                    "Try to find common ground with other agents where possible."
+                )
+
+            for agent in active_agents:
+                try:
+                    messages = [{"role": "user", "content": round_instruction}]
+                    argument = await call_agent(client, agent, messages, req.lang, req.context)
+                    round_results.append({
+                        "name": agent["name"],
+                        "role": agent["role"],
+                        "argument": argument,
+                    })
+                except Exception as e:
+                    round_results.append({
+                        "name": agent["name"],
+                        "role": agent["role"],
+                        "argument": f"Agent failed: {str(e)}",
+                    })
+                await asyncio.sleep(1.0)  # Avoid Groq rate limits
+
+            # Build debate history for next round
+            round_text = f"\n--- Round {round_num} ---\n"
+            for r in round_results:
+                round_text += f"\n[{r['name']}]: {r['argument']}\n"
+            debate_history += round_text
+
+            all_rounds.append({
+                "round": round_num,
+                "agents": round_results,
+            })
+
+        # Calculate consensus from final round
+        final_round = all_rounds[-1]["agents"] if all_rounds else []
+        votes = {"approve": 0, "reject": 0, "conditional": 0}
+
+        approve_words = {"approve", "apruebo", "aprobado", "approuvé", "aprovado", "genehmigt", "approvato"}
+        reject_words = {"reject", "rechazo", "rechazado", "rejeté", "rejeitado", "abgelehnt", "rifiutato"}
+        conditional_words = {"conditional", "condicional", "conditionnel", "bedingt", "condizionale"}
+
+        for agent_result in final_round:
+            arg_lower = agent_result["argument"].lower().strip()
+            first_word = arg_lower.split()[0].rstrip(".:,;") if arg_lower else ""
+
+            if first_word in approve_words or arg_lower.startswith("approve"):
+                votes["approve"] += 1
+                agent_result["vote"] = "approve"
+            elif first_word in reject_words or arg_lower.startswith("reject"):
+                votes["reject"] += 1
+                agent_result["vote"] = "reject"
+            elif first_word in conditional_words or arg_lower.startswith("conditional"):
+                votes["conditional"] += 1
+                agent_result["vote"] = "conditional"
+            else:
+                # Try to find vote keyword anywhere in first 50 chars
+                first_50 = arg_lower[:50]
+                if any(w in first_50 for w in approve_words):
+                    votes["approve"] += 1
+                    agent_result["vote"] = "approve"
+                elif any(w in first_50 for w in reject_words):
+                    votes["reject"] += 1
+                    agent_result["vote"] = "reject"
+                elif any(w in first_50 for w in conditional_words):
+                    votes["conditional"] += 1
+                    agent_result["vote"] = "conditional"
+                else:
+                    agent_result["vote"] = "unknown"
+
+    total = len(final_round)
+    consensus = {
+        "votes": votes,
+        "total": total,
+        "level": "unanimous" if votes["approve"] == total else
+                 "strong" if votes["approve"] >= total * 0.75 else
+                 "majority" if votes["approve"] + votes["conditional"] > total * 0.5 else
+                 "divided",
+    }
+
+    return {
+        "topic": req.topic,
+        "rounds": all_rounds,
+        "consensus": consensus,
+    }
+
+
+class InitRequest(BaseModel):
+    path: str
+
+
+@app.post("/init")
+def init_project(req: InitRequest):
+    context = scan_project(req.path)
+    if "error" in context:
+        raise HTTPException(status_code=400, detail=context["error"])
+    return context
+
+
+class AdrAgent(BaseModel):
+    name: str
+    role: str
+    stance: str
+    argument: str
+
+
+class AdrRequest(BaseModel):
+    topic: str
+    agents: list[AdrAgent]
+    lang: str = "en"
+
+
+ADR_SYSTEM = (
+    "You are a technical writer that synthesizes architecture debates into "
+    "Architecture Decision Records (ADR). You receive a topic and the arguments "
+    "from multiple agents with different perspectives. "
+    "Generate a well-structured ADR in markdown with these exact sections: "
+    "# ADR-{number}: {title}, ## Status (always 'Proposed'), "
+    "## Context (why this decision came up), "
+    "## Positions (summarize each agent's argument with their name as bold label), "
+    "## Decision (your synthesized recommendation based on all perspectives), "
+    "## Consequences (what changes if this is accepted, both positive and negative). "
+    "Write in normal sentence case. NEVER use all caps. "
+    "Be concise but thorough. Use the ADR number provided."
+)
+
+
+@app.post("/generate-adr")
+async def generate_adr(req: AdrRequest):
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+    system = ADR_SYSTEM + (" " + lang_extra if lang_extra else "")
+
+    agents_summary = "\n\n".join(
+        f"**{a.name}** ({a.role}):\n{a.argument}" for a in req.agents
+    )
+    user_msg = f"Topic: {req.topic}\n\nAgent arguments:\n{agents_summary}\n\nGenerate ADR number 1."
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_msg},
+                ],
+                "temperature": 0.4,
+                "max_tokens": 1000,
+            },
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        adr_content = data["choices"][0]["message"]["content"]
+
+    return {"adr": adr_content}
+
+
+class GenerateRequest(BaseModel):
+    adr: str
+    context: dict | None = None
+    lang: str = "en"
+
+
+GENERATE_SYSTEM = (
+    "You are an expert code generator. You receive an Architecture Decision Record (ADR) "
+    "and a project context (languages, frameworks, structure, dependencies). "
+    "Generate the implementation code needed to fulfill the ADR decision. "
+    "RULES: "
+    "- Follow the project's existing conventions, patterns, and naming style. "
+    "- Use the same frameworks and libraries already in the project. "
+    "- Output each file with its relative path as a markdown header: ## path/to/File.java "
+    "- Include the full file content in a code block with the correct language tag. "
+    "- Only generate files that are strictly necessary. "
+    "- Add brief comments explaining key decisions. "
+    "Write in normal sentence case. NEVER use all caps."
+)
+
+
+@app.post("/generate")
+async def generate_code(req: GenerateRequest):
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+    context_block = _build_context_block(req.context)
+    system = GENERATE_SYSTEM + (" " + lang_extra if lang_extra else "") + context_block
+
+    user_msg = f"Implement the following ADR decision. Generate all necessary code files.\n\n{req.adr}"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_msg},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 2000,
+            },
+            timeout=45.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        code_content = data["choices"][0]["message"]["content"]
+
+    return {"code": code_content}
+
+
+class ReviewRequest(BaseModel):
+    file_path: str
+    file_content: str
+    context: dict | None = None
+    lang: str = "en"
+    agents_dir: str | None = None
+
+
+REVIEW_AGENTS = [
+    {
+        "name": "Architect",
+        "role": "architect",
+        "system": (
+            "You are reviewing code as the Architect. Focus on: "
+            "design patterns, SOLID violations, coupling, cohesion, naming conventions, "
+            "and architectural consistency. Identify specific lines when possible. "
+            "Give actionable suggestions, not vague advice. "
+            "Write in normal sentence case. NEVER use all caps. "
+            "Keep your review under 200 words."
+        ),
+    },
+    {
+        "name": "Pragmatic",
+        "role": "pragmatic",
+        "system": (
+            "You are reviewing code as the Pragmatic developer. Focus on: "
+            "code simplicity, readability, unnecessary complexity, dead code, "
+            "and whether the code could be simpler. Challenge over-abstraction. "
+            "If the code is fine, say so - don't invent problems. "
+            "Write in normal sentence case. NEVER use all caps. "
+            "Keep your review under 200 words."
+        ),
+    },
+    {
+        "name": "Security",
+        "role": "security",
+        "system": (
+            "You are reviewing code as the Security expert. Focus on: "
+            "SQL injection, XSS, CSRF, insecure deserialization, hardcoded secrets, "
+            "missing input validation, improper error handling that leaks info, "
+            "authentication/authorization flaws. Be specific about the vulnerability "
+            "and the fix. Write in normal sentence case. NEVER use all caps. "
+            "Keep your review under 200 words."
+        ),
+    },
+    {
+        "name": "DevOps",
+        "role": "devops",
+        "system": (
+            "You are reviewing code as the DevOps engineer. Focus on: "
+            "logging quality, error handling for production, configuration management, "
+            "health check readiness, resource cleanup, connection pooling, "
+            "and whether this code will be easy to debug in production. "
+            "Write in normal sentence case. NEVER use all caps. "
+            "Keep your review under 200 words."
+        ),
+    },
+]
+
+
+@app.post("/review")
+async def review_code(req: ReviewRequest):
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+    context_block = _build_context_block(req.context)
+    user_msg = f"Review this file: {req.file_path}\n\n```\n{req.file_content}\n```"
+
+    # Use custom agents if provided, otherwise default
+    active_review_agents = REVIEW_AGENTS
+    custom = _load_custom_agents(req.agents_dir)
+    if custom:
+        active_review_agents = REVIEW_AGENTS + custom
+
+    reviews = []
+    async with httpx.AsyncClient() as client:
+        for agent in active_review_agents:
+            try:
+                system = agent["system"] + (" " + lang_extra if lang_extra else "") + context_block
+                response = await client.post(
+                    GROQ_URL,
+                    headers={
+                        "Authorization": f"Bearer {GROQ_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": MODEL,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "temperature": 0.4,
+                        "max_tokens": 400,
+                    },
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                data = response.json()
+                review_text = data["choices"][0]["message"]["content"]
+                reviews.append({
+                    "name": agent["name"],
+                    "role": agent["role"],
+                    "review": review_text,
+                })
+            except Exception as e:
+                reviews.append({
+                    "name": agent["name"],
+                    "role": agent["role"],
+                    "review": f"Review failed: {str(e)}",
+                })
+            await asyncio.sleep(1.0)  # Avoid Groq rate limits
+
+    return {"file": req.file_path, "reviews": reviews}
+
+
+class HealthRequest(BaseModel):
+    context: dict
+    lang: str = "en"
+
+
+HEALTH_SYSTEM = (
+    "You are a project health analyzer. You receive a project's context (languages, "
+    "frameworks, dependencies, structure) and evaluate its health across these dimensions: "
+    "security, maintainability, architecture, devops, testing. "
+    "You MUST respond with ONLY valid JSON, no markdown, no explanation, just the JSON object. "
+    "Format: "
+    '{"scores": {"Security": {"score": 0-100, "detail": "brief reason"}, '
+    '"Maintainability": {"score": 0-100, "detail": "brief reason"}, '
+    '"Architecture": {"score": 0-100, "detail": "brief reason"}, '
+    '"DevOps": {"score": 0-100, "detail": "brief reason"}, '
+    '"Testing": {"score": 0-100, "detail": "brief reason"}}, '
+    '"overall": 0-100, '
+    '"recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"]} '
+    "Base scores on real evidence from the project context. Be fair but critical."
+)
+
+
+@app.post("/health-check")
+async def health_check(req: HealthRequest):
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    import json as json_module
+
+    lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+    context_block = _build_context_block(req.context)
+    system = HEALTH_SYSTEM + (" " + lang_extra if lang_extra else "")
+    user_msg = f"Analyze this project's health:\n{context_block}"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_msg},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 800,
+            },
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+
+        # Try to parse JSON, handle markdown wrapping
+        content = content.strip()
+        if content.startswith("```"):
+            content = content.split("\n", 1)[1] if "\n" in content else content
+            content = content.rsplit("```", 1)[0]
+            content = content.strip()
+
+        try:
+            result = json_module.loads(content)
+        except json_module.JSONDecodeError:
+            result = {
+                "scores": {},
+                "overall": 0,
+                "recommendations": ["Could not parse health analysis. Try again."],
+                "raw": content,
+            }
+
+    return result

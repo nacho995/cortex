@@ -1,0 +1,29 @@
+# Java
+target/
+*.class
+*.jar
+*.war
+.mvn/wrapper/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cortex generated
+.architect/
