@@ -372,34 +372,44 @@ public class CortexCLI implements Runnable {
             com.google.gson.Gson gson = new com.google.gson.Gson();
             StringBuilder fullMessage = new StringBuilder();
             
-            // Add project context
+            // Add project context with actual file contents
             if (currentProject != null) {
-                String projectType = "unknown";
                 java.nio.file.Path pp = java.nio.file.Path.of(currentProject);
+                String projectType = "unknown";
                 if (java.nio.file.Files.exists(pp.resolve("client/package.json")))
                     projectType = "MERN (Node.js backend + React frontend)";
                 else if (java.nio.file.Files.exists(pp.resolve("package.json")))
                     projectType = "Node.js";
                 else if (java.nio.file.Files.exists(pp.resolve("pom.xml")))
-                    projectType = "Java/Maven/Spring Boot";
+                    projectType = "Java/Maven";
                 else if (java.nio.file.Files.exists(pp.resolve("requirements.txt")))
                     projectType = "Python";
+                
                 fullMessage.append("[Project: ").append(currentProject).append(" | Type: ").append(projectType).append("]\n");
                 
-                // Read key config files for context
-                try {
-                    java.nio.file.Path envFile = pp.resolve(".env");
-                    if (java.nio.file.Files.exists(envFile)) {
-                        fullMessage.append("[.env: ").append(java.nio.file.Files.readString(envFile).replaceAll("\\n", ", ")).append("]\n");
-                    }
-                    java.nio.file.Path serverFile = pp.resolve("server.js");
-                    if (java.nio.file.Files.exists(serverFile)) {
-                        String server = java.nio.file.Files.readString(serverFile);
-                        // Extract port
-                        java.util.regex.Matcher portMatch = java.util.regex.Pattern.compile("PORT.*?(\\d{4})").matcher(server);
-                        if (portMatch.find()) fullMessage.append("[Backend port: ").append(portMatch.group(1)).append("]\n");
-                    }
+                // Read actual project files for context
+                fullMessage.append("[Project files:\n");
+                try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(pp, 4)) {
+                    walk.filter(java.nio.file.Files::isRegularFile)
+                        .filter(p -> {
+                            String s = p.toString();
+                            return !s.contains("node_modules") && !s.contains(".git") && !s.contains("target") && !s.contains("build") && !s.contains("dist");
+                        })
+                        .filter(p -> {
+                            String name = p.getFileName().toString();
+                            return name.endsWith(".js") || name.endsWith(".jsx") || name.endsWith(".css") || name.endsWith(".json") || name.endsWith(".java") || name.endsWith(".py") || name.endsWith(".ts") || name.endsWith(".env") || name.endsWith(".html");
+                        })
+                        .limit(15)
+                        .forEach(p -> {
+                            try {
+                                String relPath = pp.relativize(p).toString();
+                                String content = java.nio.file.Files.readString(p);
+                                if (content.length() > 500) content = content.substring(0, 500) + "...";
+                                fullMessage.append("--- ").append(relPath).append(" ---\n").append(content).append("\n");
+                            } catch (Exception e) { /* skip */ }
+                        });
                 } catch (Exception e) { /* skip */ }
+                fullMessage.append("]\n");
             }
             
             // Add last 4 history entries
@@ -434,6 +444,29 @@ public class CortexCLI implements Runnable {
                     for (int i = 0; i < Math.min(lines.length, 30); i++) {
                         System.out.println("  " + lines[i]);
                     }
+
+                    // If AI generated files, write them to project
+                    if (json.has("files") && currentProject != null) {
+                        com.google.gson.JsonArray files = json.getAsJsonArray("files");
+                        if (files != null && files.size() > 0) {
+                            System.out.println();
+                            for (com.google.gson.JsonElement elem : files) {
+                                com.google.gson.JsonObject file = elem.getAsJsonObject();
+                                String filePath = file.get("path").getAsString();
+                                String content = file.get("content").getAsString();
+                                java.nio.file.Path fullPath = java.nio.file.Path.of(currentProject).resolve(filePath);
+                                boolean existed = java.nio.file.Files.exists(fullPath);
+                                java.nio.file.Files.createDirectories(fullPath.getParent());
+                                java.nio.file.Files.writeString(fullPath, content);
+                                if (existed) {
+                                    System.out.println("    " + YELLOW + "~" + RESET + " " + filePath + DIM + " (modified)" + RESET);
+                                } else {
+                                    System.out.println("    " + GREEN + "+" + RESET + " " + filePath + DIM + " (created)" + RESET);
+                                }
+                            }
+                        }
+                    }
+
                     chatHistory.add("User: " + message);
                     chatHistory.add("Cortex: " + (text.length() > 300 ? text.substring(0, 300) : text));
                     while (chatHistory.size() > 10) chatHistory.remove(0);
