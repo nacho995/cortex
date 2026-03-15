@@ -364,6 +364,90 @@ public class CortexCLI implements Runnable {
         return null;
     }
 
+    private void handleChat(String message, String currentProject) {
+        try {
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            java.util.Map<String, Object> bodyMap = new java.util.HashMap<>();
+            bodyMap.put("message", message);
+            bodyMap.put("lang", "es");
+
+            if (currentProject != null) {
+                bodyMap.put("project_path", currentProject);
+                
+                // Read project context
+                java.nio.file.Path contextPath = java.nio.file.Path.of(currentProject, ".architect", "context.json");
+                if (java.nio.file.Files.exists(contextPath)) {
+                    bodyMap.put("context", gson.fromJson(java.nio.file.Files.readString(contextPath), Object.class));
+                }
+
+                // List project files for context
+                java.util.List<java.util.Map<String, String>> filesList = new java.util.ArrayList<>();
+                try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(java.nio.file.Path.of(currentProject), 3)) {
+                    walk.filter(java.nio.file.Files::isRegularFile)
+                        .filter(p -> {
+                            String name = p.getFileName().toString();
+                            return name.endsWith(".js") || name.endsWith(".jsx") || name.endsWith(".css") || name.endsWith(".json") || name.endsWith(".java") || name.endsWith(".py") || name.endsWith(".ts");
+                        })
+                        .filter(p -> !p.toString().contains("node_modules") && !p.toString().contains("target"))
+                        .limit(15)
+                        .forEach(p -> {
+                            java.util.Map<String, String> m = new java.util.HashMap<>();
+                            m.put("path", java.nio.file.Path.of(currentProject).relativize(p).toString());
+                            filesList.add(m);
+                        });
+                } catch (Exception e) { /* skip */ }
+                bodyMap.put("files_context", filesList);
+            }
+
+            String token = TokenHelper.loadToken();
+            if (token != null) bodyMap.put("token", token);
+
+            String body = gson.toJson(bodyMap);
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                    .version(java.net.http.HttpClient.Version.HTTP_1_1).build();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://cortex-ai.fly.dev/chat"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+
+            java.net.http.HttpResponse<String> response = client.send(request, 
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                com.google.gson.JsonObject json = gson.fromJson(response.body(), com.google.gson.JsonObject.class);
+                if (json != null && json.has("response")) {
+                    String text = json.get("response").getAsString();
+                    System.out.println();
+                    for (String chatLine : text.split("\n")) {
+                        System.out.println("  " + chatLine);
+                    }
+
+                    // If AI generated files and there's a current project, offer to save
+                    if (json.has("files") && json.getAsJsonArray("files").size() > 0 && currentProject != null) {
+                        com.google.gson.JsonArray files = json.getAsJsonArray("files");
+                        System.out.println();
+                        System.out.println("  " + BOLD + GREEN + files.size() + " files generated." + RESET);
+                        for (com.google.gson.JsonElement elem : files) {
+                            com.google.gson.JsonObject file = elem.getAsJsonObject();
+                            String filePath = file.get("path").getAsString();
+                            String content = file.get("content").getAsString();
+                            java.nio.file.Path fullPath = java.nio.file.Path.of(currentProject).resolve(filePath);
+                            java.nio.file.Files.createDirectories(fullPath.getParent());
+                            java.nio.file.Files.writeString(fullPath, content);
+                            System.out.println("    " + GREEN + "+" + RESET + " " + filePath);
+                        }
+                    }
+                }
+            } else {
+                System.out.println("  " + DIM + "No pude procesar eso. Intenta con un comando o escribe 'help'." + RESET);
+            }
+        } catch (Exception e) {
+            System.out.println("  " + DIM + "No pude conectar al servicio. Intenta con un comando." + RESET);
+        }
+    }
+
     private void interactiveMode() {
         printBanner();
         printWelcome();
@@ -464,7 +548,9 @@ public class CortexCLI implements Runnable {
                 // Natural language → detect intent and build command
                 cmdArgs = interpretNaturalLanguage(line, lineLower, currentProject);
                 if (cmdArgs == null) {
-                    // Truly unrecognized input, ignore silently
+                    // Fallback: send to AI chat
+                    handleChat(line, currentProject);
+                    System.out.println();
                     continue;
                 }
                 // Show interpreted command

@@ -1344,3 +1344,58 @@ async def ask_expert(req: AskRequest):
 
     parsed_files = _parse_files_from_response(response_text)
     return {"expert": req.expert, "name": expert["name"], "response": response_text, "files": parsed_files}
+
+
+class ChatRequest(BaseModel):
+    message: str
+    project_path: str | None = None
+    files_context: list[dict] | None = None
+    context: dict | None = None
+    lang: str = "es"
+    token: str | None = None
+
+
+CHAT_SYSTEM = (
+    "You are Cortex, an AI architecture assistant inside a CLI terminal. "
+    "The user is talking to you naturally. Respond helpfully and concisely. "
+    "You know about the user's project if context is provided. "
+    "RULES: "
+    "- If the user asks how to run/start a project, detect the type (package.json=npm, pom.xml=mvn, requirements.txt=pip) and give the exact commands. "
+    "- If the user asks to fix/create/modify code, tell them which cortex command to use. "
+    "- If the user asks a technical question, answer it with code examples. "
+    "- If the user wants code generated, use FILE: path/to/file.ext format. "
+    "- Keep answers SHORT (max 10 lines) unless code is needed. "
+    "- Be friendly and direct. No corporate speak."
+)
+
+
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    if req.token:
+        user = validate_token(req.token)
+        if user:
+            rate = check_rate_limit(user["id"], user["plan"])
+            if not rate["allowed"]:
+                raise HTTPException(status_code=429, detail="Daily limit reached.")
+            track_usage(user["id"], "chat")
+
+    lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+    context_block = _build_context_block(req.context)
+    
+    files_info = ""
+    if req.files_context:
+        files_info = "\n\nProject files:\n"
+        for f in req.files_context[:10]:
+            files_info += f"- {f.get('path', 'unknown')}\n"
+
+    system = CHAT_SYSTEM + (" " + lang_extra if lang_extra else "") + context_block + files_info
+
+    route = get_route("review")  # Use fast model for chat
+
+    try:
+        response_text = await call_llm(route, system, req.message, temperature=0.5, max_tokens=1000)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Chat failed: {str(e)}")
+
+    parsed_files = _parse_files_from_response(response_text)
+    return {"response": response_text, "files": parsed_files}
