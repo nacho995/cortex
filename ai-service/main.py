@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from scanner import scan_project
 from auth import register_user, validate_token, check_rate_limit, track_usage, get_usage_stats, upgrade_plan, PLANS
+from router import get_route, detect_complexity
+from llm_client import call_llm
 
 load_dotenv()
 
@@ -235,53 +237,27 @@ def _resolve_user_and_model(token: str | None, endpoint: str) -> tuple[str, str,
 # ============== END AUTH & BILLING ==============
 
 
-async def call_agent(client: httpx.AsyncClient, agent: dict, messages: list[dict], lang: str, context: dict | None = None) -> str:
-    """Call Groq API for a single agent with retry on rate limit."""
+async def call_agent(
+    client: httpx.AsyncClient,
+    agent: dict,
+    messages: list[dict],
+    lang: str,
+    context: dict | None = None,
+    task: str = "debate",
+) -> str:
+    """Call the best LLM for a task using intelligent routing."""
     lang_extra = LANG_INSTRUCTION.get(lang, f"You MUST respond entirely in the language with code '{lang}'.")
     context_block = _build_context_block(context)
     system_prompt = agent["system"] + (" " + lang_extra if lang_extra else "") + context_block
 
-    all_messages = [{"role": "system", "content": system_prompt}] + messages
+    user_message = messages[0]["content"] if messages else ""
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = await client.post(
-                GROQ_URL,
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": MODEL,
-                    "messages": all_messages,
-                    "temperature": 0.8,
-                    "max_tokens": 300,
-                },
-                timeout=30.0,
-            )
-            if response.status_code == 429:
-                wait_time = (attempt + 1) * 5  # 5s, 10s, 15s
-                await asyncio.sleep(wait_time)
-                continue
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429 and attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 5
-                await asyncio.sleep(wait_time)
-                continue
-            raise
-
-    raise Exception("Rate limited after all retries")
+    route = get_route(task)
+    return await call_llm(route, system_prompt, user_message, temperature=0.8, max_tokens=300)
 
 
 @app.post("/debate")
 async def debate(req: DebateRequest):
-    if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
-
     _resolve_user_and_model(req.token, "debate")
 
     num_rounds = max(1, min(req.rounds, 5))  # clamp between 1-5
@@ -442,9 +418,6 @@ ADR_SYSTEM = (
 
 @app.post("/generate-adr")
 async def generate_adr(req: AdrRequest):
-    if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
-
     _resolve_user_and_model(req.token, "generate-adr")
 
     lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
@@ -455,27 +428,8 @@ async def generate_adr(req: AdrRequest):
     )
     user_msg = f"Topic: {req.topic}\n\nAgent arguments:\n{agents_summary}\n\nGenerate ADR number 1."
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_msg},
-                ],
-                "temperature": 0.4,
-                "max_tokens": 1000,
-            },
-            timeout=30.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        adr_content = data["choices"][0]["message"]["content"]
+    route = get_route("adr")
+    adr_content = await call_llm(route, system, user_msg, temperature=0.4, max_tokens=1000)
 
     return {"adr": adr_content}
 
@@ -504,9 +458,6 @@ GENERATE_SYSTEM = (
 
 @app.post("/generate")
 async def generate_code(req: GenerateRequest):
-    if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
-
     _resolve_user_and_model(req.token, "generate")
 
     lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
@@ -515,27 +466,8 @@ async def generate_code(req: GenerateRequest):
 
     user_msg = f"Implement the following ADR decision. Generate all necessary code files.\n\n{req.adr}"
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_msg},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 2000,
-            },
-            timeout=45.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        code_content = data["choices"][0]["message"]["content"]
+    route = get_route("generate")
+    code_content = await call_llm(route, system, user_msg, temperature=0.3, max_tokens=2000, timeout=45.0)
 
     return {"code": code_content}
 
@@ -603,9 +535,6 @@ REVIEW_AGENTS = [
 
 @app.post("/review")
 async def review_code(req: ReviewRequest):
-    if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
-
     _resolve_user_and_model(req.token, "review")
 
     lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
@@ -619,42 +548,23 @@ async def review_code(req: ReviewRequest):
         active_review_agents = REVIEW_AGENTS + custom
 
     reviews = []
-    async with httpx.AsyncClient() as client:
-        for agent in active_review_agents:
-            try:
-                system = agent["system"] + (" " + lang_extra if lang_extra else "") + context_block
-                response = await client.post(
-                    GROQ_URL,
-                    headers={
-                        "Authorization": f"Bearer {GROQ_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": MODEL,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": user_msg},
-                        ],
-                        "temperature": 0.4,
-                        "max_tokens": 400,
-                    },
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                data = response.json()
-                review_text = data["choices"][0]["message"]["content"]
-                reviews.append({
-                    "name": agent["name"],
-                    "role": agent["role"],
-                    "review": review_text,
-                })
-            except Exception as e:
-                reviews.append({
-                    "name": agent["name"],
-                    "role": agent["role"],
-                    "review": f"Review failed: {str(e)}",
-                })
-            await asyncio.sleep(2.0)  # Avoid Groq rate limits
+    for agent in active_review_agents:
+        try:
+            system = agent["system"] + (" " + lang_extra if lang_extra else "") + context_block
+            route = get_route("review")
+            review_text = await call_llm(route, system, user_msg, temperature=0.4, max_tokens=400)
+            reviews.append({
+                "name": agent["name"],
+                "role": agent["role"],
+                "review": review_text,
+            })
+        except Exception as e:
+            reviews.append({
+                "name": agent["name"],
+                "role": agent["role"],
+                "review": f"Review failed: {str(e)}",
+            })
+        await asyncio.sleep(2.0)  # Avoid rate limits
 
     return {"file": req.file_path, "reviews": reviews}
 
@@ -684,9 +594,6 @@ HEALTH_SYSTEM = (
 
 @app.post("/health-check")
 async def health_check(req: HealthRequest):
-    if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
-
     _resolve_user_and_model(req.token, "health-check")
 
     import json as json_module
@@ -696,44 +603,25 @@ async def health_check(req: HealthRequest):
     system = HEALTH_SYSTEM + (" " + lang_extra if lang_extra else "")
     user_msg = f"Analyze this project's health:\n{context_block}"
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_msg},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 800,
-            },
-            timeout=30.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        content = data["choices"][0]["message"]["content"]
+    route = get_route("health")
+    content = await call_llm(route, system, user_msg, temperature=0.3, max_tokens=800)
 
-        # Try to parse JSON, handle markdown wrapping
+    # Try to parse JSON, handle markdown wrapping
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1] if "\n" in content else content
+        content = content.rsplit("```", 1)[0]
         content = content.strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1] if "\n" in content else content
-            content = content.rsplit("```", 1)[0]
-            content = content.strip()
 
-        try:
-            result = json_module.loads(content)
-        except json_module.JSONDecodeError:
-            result = {
-                "scores": {},
-                "overall": 0,
-                "recommendations": ["Could not parse health analysis. Try again."],
-                "raw": content,
-            }
+    try:
+        result = json_module.loads(content)
+    except json_module.JSONDecodeError:
+        result = {
+            "scores": {},
+            "overall": 0,
+            "recommendations": ["Could not parse health analysis. Try again."],
+            "raw": content,
+        }
 
     return result
 
@@ -843,27 +731,8 @@ def _parse_files_from_response(content: str) -> list[dict]:
 
 @app.post("/create")
 async def create_code(req: CreateRequest):
-    if not GROQ_API_KEY and req.provider == "groq" and not req.api_key:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
-
-    if req.token and not req.api_key:
-        use_url, use_key, use_model = _resolve_user_and_model(req.token, "create")
-    else:
-        _resolve_user_and_model(req.token, "create") if req.token else None
-
-    # Resolve provider
-    if req.provider == "openai":
-        use_url = OPENAI_URL
-        use_key = req.api_key or OPENAI_API_KEY
-        use_model = req.model or "gpt-4o-mini"
-        if not use_key:
-            raise HTTPException(status_code=400, detail="OpenAI API key required. Pass api_key in request or set OPENAI_API_KEY env var.")
-    else:
-        use_url = GROQ_URL
-        use_key = req.api_key or GROQ_API_KEY
-        use_model = req.model or MODEL
-        if not use_key:
-            raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+    if req.token:
+        _resolve_user_and_model(req.token, "create")
 
     lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
     context_block = _build_context_block(req.context)
@@ -892,79 +761,25 @@ async def create_code(req: CreateRequest):
 
     all_code = ""
 
-    async with httpx.AsyncClient() as client:
-        if is_fullstack:
-            # Split into two calls: backend first, then frontend
-            for part, instruction in [
-                ("BACKEND", f"Build ONLY the BACKEND for: {req.prompt}{debate_info}\nGenerate all server-side files: routes, controllers, models, config, package.json/pom.xml, etc."),
-                ("FRONTEND", f"Build ONLY the FRONTEND for: {req.prompt}{debate_info}\nGenerate all client-side files inside a 'frontend/' directory: components, pages, styles, package.json, index.html, etc. All frontend paths must start with frontend/"),
-            ]:
-                for attempt in range(3):
-                    try:
-                        response = await client.post(
-                            use_url,
-                            headers={
-                                "Authorization": f"Bearer {use_key}",
-                                "Content-Type": "application/json",
-                            },
-                            json={
-                                "model": use_model,
-                                "messages": [
-                                    {"role": "system", "content": system},
-                                    {"role": "user", "content": instruction},
-                                ],
-                                "temperature": 0.3,
-                                "max_tokens": 7000,
-                            },
-                            timeout=60.0,
-                        )
-                        if response.status_code == 429:
-                            await asyncio.sleep((attempt + 1) * 5)
-                            continue
-                        response.raise_for_status()
-                        data = response.json()
-                        all_code += f"\n\n# === {part} ===\n\n"
-                        all_code += data["choices"][0]["message"]["content"]
-                        break
-                    except httpx.HTTPStatusError as e:
-                        if e.response.status_code == 429 and attempt < 2:
-                            await asyncio.sleep((attempt + 1) * 5)
-                            continue
-                        raise
-                await asyncio.sleep(3)  # Delay between backend and frontend calls
-        else:
-            # Single call for simpler projects
-            for attempt in range(3):
-                try:
-                    response = await client.post(
-                        use_url,
-                        headers={
-                            "Authorization": f"Bearer {use_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "model": use_model,
-                            "messages": [
-                                {"role": "system", "content": system},
-                                {"role": "user", "content": f"Build this: {req.prompt}{debate_info}"},
-                            ],
-                            "temperature": 0.3,
-                            "max_tokens": 7000,
-                        },
-                        timeout=60.0,
-                    )
-                    if response.status_code == 429:
-                        await asyncio.sleep((attempt + 1) * 5)
-                        continue
-                    response.raise_for_status()
-                    data = response.json()
-                    all_code = data["choices"][0]["message"]["content"]
-                    break
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 429 and attempt < 2:
-                        await asyncio.sleep((attempt + 1) * 5)
-                        continue
-                    raise
+    # Intelligent routing: detect complexity from prompt
+    route = get_route("create", req.prompt)
+
+    if is_fullstack:
+        # Split into two calls: backend first, then frontend
+        for part, instruction in [
+            ("BACKEND", f"Build ONLY the BACKEND for: {req.prompt}{debate_info}\nGenerate all server-side files: routes, controllers, models, config, package.json/pom.xml, etc."),
+            ("FRONTEND", f"Build ONLY the FRONTEND for: {req.prompt}{debate_info}\nGenerate all client-side files inside a 'frontend/' directory: components, pages, styles, package.json, index.html, etc. All frontend paths must start with frontend/"),
+        ]:
+            part_code = await call_llm(route, system, instruction, temperature=0.3, max_tokens=7000)
+            all_code += f"\n\n# === {part} ===\n\n"
+            all_code += part_code
+            await asyncio.sleep(3)  # Delay between backend and frontend calls
+    else:
+        # Single call for simpler projects
+        all_code = await call_llm(
+            route, system, f"Build this: {req.prompt}{debate_info}",
+            temperature=0.3, max_tokens=7000,
+        )
 
     parsed_files = _parse_files_from_response(all_code)
     return {"code": all_code, "files": parsed_files}
@@ -1003,20 +818,8 @@ async def add_to_project(req: AddRequest):
         if user:
             rate = check_rate_limit(user["id"], user["plan"])
             if not rate["allowed"]:
-                raise HTTPException(status_code=429, detail=f"Daily limit reached. Run 'cortex upgrade'.")
+                raise HTTPException(status_code=429, detail="Daily limit reached. Run 'cortex upgrade'.")
             track_usage(user["id"], "add")
-
-    use_url = GROQ_URL
-    use_key = req.api_key or GROQ_API_KEY
-    use_model = req.model or MODEL
-
-    if req.provider == "openai":
-        use_url = "https://api.openai.com/v1/chat/completions"
-        use_key = req.api_key or os.getenv("OPENAI_API_KEY")
-        use_model = req.model or "gpt-4o-mini"
-
-    if not use_key:
-        raise HTTPException(status_code=500, detail="API key not configured")
 
     lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
     system = ADD_SYSTEM + (" " + lang_extra if lang_extra else "")
@@ -1030,40 +833,8 @@ async def add_to_project(req: AddRequest):
 
     user_msg = f"Modify this project: {req.instruction}{files_context}"
 
-    async with httpx.AsyncClient() as client:
-        for attempt in range(3):
-            try:
-                response = await client.post(
-                    use_url,
-                    headers={
-                        "Authorization": f"Bearer {use_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": use_model,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": user_msg},
-                        ],
-                        "temperature": 0.3,
-                        "max_tokens": 7000,
-                    },
-                    timeout=60.0,
-                )
-                if response.status_code == 429:
-                    await asyncio.sleep((attempt + 1) * 5)
-                    continue
-                response.raise_for_status()
-                data = response.json()
-                code_content = data["choices"][0]["message"]["content"]
-                break
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429 and attempt < 2:
-                    await asyncio.sleep((attempt + 1) * 5)
-                    continue
-                raise
-        else:
-            raise HTTPException(status_code=429, detail="Rate limited after retries")
+    route = get_route("add")
+    code_content = await call_llm(route, system, user_msg, temperature=0.3, max_tokens=7000)
 
     parsed_files = _parse_files_from_response(code_content)
     return {"code": code_content, "files": parsed_files}
@@ -1106,37 +877,6 @@ async def generate_diagram(req: DiagramRequest):
 
     user_msg = f"Generate an ASCII architecture diagram for this project:{context_block}"
 
-    async with httpx.AsyncClient() as client:
-        for attempt in range(3):
-            try:
-                response = await client.post(
-                    GROQ_URL,
-                    headers={
-                        "Authorization": f"Bearer {GROQ_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": MODEL,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": user_msg},
-                        ],
-                        "temperature": 0.3,
-                        "max_tokens": 1000,
-                    },
-                    timeout=30.0,
-                )
-                if response.status_code == 429:
-                    await asyncio.sleep((attempt + 1) * 5)
-                    continue
-                response.raise_for_status()
-                data = response.json()
-                diagram = data["choices"][0]["message"]["content"]
-                return {"diagram": diagram}
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429 and attempt < 2:
-                    await asyncio.sleep((attempt + 1) * 5)
-                    continue
-                raise
-
-    raise HTTPException(status_code=429, detail="Rate limited")
+    route = get_route("diagram")
+    diagram = await call_llm(route, system, user_msg, temperature=0.3, max_tokens=1000)
+    return {"diagram": diagram}
