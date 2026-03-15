@@ -17,6 +17,8 @@ import com.google.gson.JsonElement;
 
 @Command(name = "review", description = "Code review with AI agent personas")
 public class ReviewCommand implements Runnable {
+    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "http://localhost:8000")
+    private String server;
     @Option(names = {"-p", "--project"}, description = "Path to project root", required = true)
     private String project;
     @Option(names = {"-l", "--lang"}, description = "Language code", defaultValue = "es")
@@ -89,7 +91,7 @@ public class ReviewCommand implements Runnable {
 
             HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:8000/review"))
+                    .uri(URI.create(server + "/review"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();

@@ -162,22 +162,27 @@ cortex/
 - Python 3.11+
 - [Groq API key](https://console.groq.com/) (free tier available)
 
-### Setup
+### Installation
 
 ```bash
 # Clone
 git clone https://github.com/nacho995/cortex.git
 cd cortex
 
-# Python AI service
+# Install (builds JAR + adds 'cortex' to PATH)
+bash install.sh
+source ~/.bashrc
+```
+
+The AI service is already deployed at `https://cortex-ai.fly.dev` — no need to run anything locally.
+
+For local development:
+```bash
 cd ai-service
 pip install -r requirements.txt
 echo "GROQ_API_KEY=your_key_here" > .env
 uvicorn main:app --port 8000 &
-
-# Java CLI (in another terminal)
-cd ..
-mvn -q compile exec:java -Dexec.mainClass="com.cortex.cli.CortexCLI"
+cortex --server http://localhost:8000 debate "your topic"
 ```
 
 ### First Run

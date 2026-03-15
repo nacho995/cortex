@@ -15,6 +15,8 @@ import com.google.gson.JsonElement;
 
 @Command(name = "health", description = "Analyze project health score")
 public class HealthCommand implements Runnable {
+    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "http://localhost:8000")
+    private String server;
     @Option(names = {"-p", "--project"}, description = "Path to project root", required = true)
     private String project;
     @Option(names = {"-l", "--lang"}, description = "Language code", defaultValue = "es")
@@ -48,7 +50,7 @@ public class HealthCommand implements Runnable {
 
             HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:8000/health-check"))
+                    .uri(URI.create(server + "/health-check"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();

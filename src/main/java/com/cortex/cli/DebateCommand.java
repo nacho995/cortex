@@ -26,6 +26,8 @@ public class DebateCommand implements Runnable {
     private int rounds;
     @Option(names = {"--agents"}, description = "Path to custom agents YAML directory")
     private String agentsDir;
+    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "http://localhost:8000")
+    private String server;
     @Parameters(index = "0", description = "The topic to debate")
     private String topic;
 
@@ -97,7 +99,7 @@ public class DebateCommand implements Runnable {
 
             HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:8000/debate"))
+                    .uri(URI.create(server + "/debate"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
@@ -196,7 +198,7 @@ public class DebateCommand implements Runnable {
                 String adrBody = gson.toJson(adrBodyMap);
 
                 HttpRequest adrRequest = HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:8000/generate-adr"))
+                        .uri(URI.create(server + "/generate-adr"))
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(adrBody))
                         .build();

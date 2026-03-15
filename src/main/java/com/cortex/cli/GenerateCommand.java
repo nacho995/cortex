@@ -14,6 +14,8 @@ import com.google.gson.JsonObject;
 
 @Command(name = "generate", description = "Generate code from an ADR decision")
 public class GenerateCommand implements Runnable {
+    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "http://localhost:8000")
+    private String server;
     @Option(names = {"-p", "--project"}, description = "Path to project root", required = true)
     private String project;
     @Option(names = {"-l", "--lang"}, description = "Language code", defaultValue = "es")
@@ -57,7 +59,7 @@ public class GenerateCommand implements Runnable {
 
             HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:8000/generate"))
+                    .uri(URI.create(server + "/generate"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();

@@ -1,6 +1,7 @@
 package com.cortex.cli;
 
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import java.net.http.*;
 import java.net.URI;
@@ -12,6 +13,8 @@ import com.google.gson.JsonObject;
 
 @Command(name = "init", description = "Initialize a new project with Cortex")
 public class InitCommand implements Runnable {
+    @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "http://localhost:8000")
+    private String server;
     @Parameters(index = "0", description = "The project path to initialize")
     private String path;
 
@@ -21,7 +24,7 @@ public class InitCommand implements Runnable {
         try {
             HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:8000/init"))
+                    .uri(URI.create(server + "/init"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(String.format("{\"path\": \"%s\"}", path)))
                     .build();
