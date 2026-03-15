@@ -7,6 +7,8 @@ import java.util.Scanner;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 @Command(name = "cortex", version = "0.1.0",
     description = "AI Architecture Decision Engine",
@@ -193,6 +195,129 @@ public class CortexCLI implements Runnable {
         return args.toArray(new String[0]);
     }
 
+    private String[] interpretNaturalLanguage(String input, String lower) {
+        // Extract paths from input (anything starting with ~/ or / or ./)
+        String detectedPath = null;
+        for (String word : input.split("\\s+")) {
+            if (word.startsWith("~/") || word.startsWith("/") || word.startsWith("./")) {
+                detectedPath = word;
+                break;
+            }
+        }
+
+        // FIX intent: arregla, fix, error, bug, soluciona, repara
+        if (lower.matches(".*(arregla|fix|error|bug|soluciona|repara|corrige|falla|no funciona|no compila).*")) {
+            if (detectedPath != null) {
+                return new String[]{"fix", "-p", detectedPath};
+            }
+            return new String[]{"fix", "-p", "."};
+        }
+
+        // CREATE intent: crea, create, haz, hazme, genera, construye, build
+        if (lower.matches(".*(^crea |^hazme |^haz |^genera |^construye |^build |^make |crear |generar ).*")) {
+            String prompt = input;
+            // Remove trigger words at the start
+            prompt = prompt.replaceFirst("(?i)^(crea|hazme|haz|genera|construye|build|make)\\s+", "");
+            if (detectedPath != null) {
+                return new String[]{"create", "-o", detectedPath, prompt};
+            }
+            return new String[]{"create", prompt};
+        }
+
+        // DEBATE intent: debate, debati, opina, discute, que piensas
+        if (lower.matches(".*(^debate |debatir|opina|discute|que piensas|que opinas|analiza si|deberian).*")) {
+            String topic = input;
+            topic = topic.replaceFirst("(?i)^(debate|debatir|opina|discute|que piensas|que opinas)\\s+(sobre |de |si )?", "");
+            if (detectedPath != null) {
+                return new String[]{"debate", "-p", detectedPath, topic};
+            }
+            return new String[]{"debate", topic};
+        }
+
+        // ASK intent: pregunta, ask, experto, @expert
+        if (lower.contains("@") || lower.matches(".*(pregunta|experto|expert|consulta).*")) {
+            // Extract @expert if present
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("@(\\w+)").matcher(input);
+            if (matcher.find()) {
+                String expert = matcher.group(0);
+                String question = input.replaceFirst("(?i)(preguntale? al experto de \\w+|ask |consulta )?(sobre )?", "");
+                if (detectedPath != null) {
+                    return new String[]{"ask", "-p", detectedPath, expert + " " + question};
+                }
+                return new String[]{"ask", expert + " " + question};
+            }
+            // Extract expert from "preguntale al experto de java"
+            java.util.regex.Matcher expertMatcher = java.util.regex.Pattern.compile("(?i)experto de (\\w+)").matcher(input);
+            if (expertMatcher.find()) {
+                String expert = "@" + expertMatcher.group(1).toLowerCase();
+                String question = input.replaceFirst("(?i)preguntale? al experto de \\w+\\s*", "");
+                if (question.isEmpty()) question = "ayudame con mi proyecto";
+                return new String[]{"ask", expert + " " + question};
+            }
+        }
+
+        // REVIEW intent: revisa, review, analiza el codigo
+        if (lower.matches(".*(revisa|review|analiza el codigo|code review|revisame).*")) {
+            // Try to extract file path
+            java.util.regex.Matcher fileMatcher = java.util.regex.Pattern.compile("(\\S+\\.(java|py|js|ts|jsx|tsx|css|html))").matcher(input);
+            if (fileMatcher.find() && detectedPath != null) {
+                return new String[]{"review", "-p", detectedPath, fileMatcher.group(1)};
+            }
+            if (detectedPath != null) {
+                return new String[]{"review", "-p", detectedPath, "."};
+            }
+        }
+
+        // HEALTH intent: salud, health, como esta, estado, score
+        if (lower.matches(".*(salud|health|como esta|estado del|score|diagnostico|chequea).*")) {
+            if (detectedPath != null) {
+                return new String[]{"health", "-p", detectedPath};
+            }
+            return new String[]{"health", "-p", "."};
+        }
+
+        // ADD intent: agrega, add, anade, mete, pon
+        if (lower.matches(".*(^agrega |^add |^añade |^mete |^pon ).*")) {
+            String instruction = input.replaceFirst("(?i)^(agrega|add|añade|mete|pon)\\s+(a |al |en )?", "");
+            if (detectedPath != null) {
+                return new String[]{"add", "-p", detectedPath, instruction};
+            }
+            return new String[]{"add", "-p", ".", instruction};
+        }
+
+        // DIAGRAM intent: diagrama, diagram, arquitectura
+        if (lower.matches(".*(diagrama|diagram|arquitectura|estructura).*") && detectedPath != null) {
+            return new String[]{"diagram", "-p", detectedPath};
+        }
+
+        // INIT intent: escanea, scan, init, inicializa
+        if (lower.matches(".*(escanea|scan|inicializa|init).*")) {
+            if (detectedPath != null) {
+                return new String[]{"init", detectedPath};
+            }
+        }
+
+        // CONTEXT intent: contexto, context, muestra el proyecto
+        if (lower.matches(".*(contexto|context|muestra el proyecto|info del proyecto).*")) {
+            if (detectedPath != null) {
+                return new String[]{"context", "-p", detectedPath};
+            }
+        }
+
+        // UPGRADE intent: planes, plans, upgrade, precio, price, suscripcion
+        if (lower.matches(".*(planes|plans|upgrade|precio|price|suscri).*")) {
+            return new String[]{"upgrade"};
+        }
+
+        // USAGE intent: uso, usage, cuanto llevo, mi plan
+        if (lower.matches(".*(mi uso|usage|cuanto llevo|mi plan|mi cuenta).*")) {
+            return new String[]{"usage"};
+        }
+
+        // Nothing matched - return null (will be ignored)
+        return null;
+    }
+
     private void interactiveMode() {
         printBanner();
         printWelcome();
@@ -238,21 +363,30 @@ public class CortexCLI implements Runnable {
                 continue;
             }
 
-            // Parse and execute the command
-            String[] cmdArgs = parseArgs(line);
-            if (cmdArgs.length == 0) continue;
+            // Natural language intent detection
+            String lineLower = line.toLowerCase();
+            String[] cmdArgs;
 
-            // Only process valid commands, ignore everything else
-            String firstWord = cmdArgs[0].toLowerCase();
+            // Check if it's already a valid command
+            String[] rawArgs = parseArgs(line);
+            if (rawArgs.length == 0) continue;
+
             Set<String> validCommands = Set.of(
                 "debate", "init", "generate", "create", "add", "review",
                 "health", "context", "diagram", "watch", "register",
                 "login", "usage", "upgrade", "fix", "ask"
             );
 
-            if (!validCommands.contains(firstWord)) {
-                // Silently ignore non-command input (pasted errors, etc)
-                continue;
+            if (validCommands.contains(rawArgs[0].toLowerCase())) {
+                // It's already a command, execute directly
+                cmdArgs = rawArgs;
+            } else {
+                // Natural language → detect intent and build command
+                cmdArgs = interpretNaturalLanguage(line, lineLower);
+                if (cmdArgs == null) {
+                    // Truly unrecognized input, ignore silently
+                    continue;
+                }
             }
 
             try {
