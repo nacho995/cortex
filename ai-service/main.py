@@ -865,12 +865,20 @@ async def create_code(req: CreateRequest):
     system = CREATE_SYSTEM + (" " + lang_extra if lang_extra else "") + context_block
 
     prompt_lower = req.prompt.lower()
+    print(f"[CREATE] Prompt: {req.prompt[:100]}")
+    print(f"[CREATE] is_fullstack check: prompt_lower contains 'mern': {'mern' in prompt_lower}")
     is_fullstack = any(kw in prompt_lower for kw in [
         "mern", "mean", "full stack", "fullstack", "full-stack",
         "frontend y backend", "front y back", "react y node",
         "react y express", "angular y spring", "vue y express",
         "next.js", "nuxt",
     ])
+
+    # Also check original prompt (in case lowering breaks something)
+    if not is_fullstack:
+        is_fullstack = "mern" in req.prompt.lower() or "MERN" in req.prompt
+
+    print(f"[CREATE] is_fullstack (final) = {is_fullstack}")
 
     debate_info = ""
     if req.debate_context:

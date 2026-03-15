@@ -68,7 +68,6 @@ public class CreateCommand implements Runnable {
 
             Gson gson = new Gson();
             Map<String, Object> bodyMap = new HashMap<>();
-            bodyMap.put("prompt", prompt);
             bodyMap.put("lang", lang);
 
             if (project != null) {
@@ -108,6 +107,10 @@ public class CreateCommand implements Runnable {
                 System.out.println("\u001B[91m  Error: Provide a description. Example: create \"todo app with MERN\"" + RESET);
                 return;
             }
+
+            // Put prompt AFTER fromDebate block so the debate topic is included when --from-debate is used
+            bodyMap.put("prompt", prompt);
+            System.out.println(DIM + "  Debug prompt: " + prompt.substring(0, Math.min(prompt.length(), 80)) + RESET);
 
             bodyMap.put("provider", provider);
             if (apiKey != null) bodyMap.put("api_key", apiKey);
