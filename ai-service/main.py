@@ -1140,3 +1140,210 @@ async def fix_code(req: FixRequest):
 
     parsed_files = _parse_files_from_response(code)
     return {"code": code, "files": parsed_files}
+
+
+# ============== EXPERT SUB-AGENTS ==============
+
+EXPERTS = {
+    "java": {
+        "name": "Java/Spring Boot Expert",
+        "system": (
+            "You are a senior Java and Spring Boot expert. You specialize in: "
+            "Java 21+, Spring Boot 4, Spring Security, JPA/Hibernate, hexagonal architecture, "
+            "SOLID principles, design patterns, REST APIs, WebSocket, testing with JUnit/Mockito. "
+            "You write clean, production-ready Java code following industry best practices. "
+            "When asked to generate code, use FILE: path/to/File.java format. "
+            "When explaining concepts, be concise and include code examples."
+        ),
+    },
+    "spring": {
+        "name": "Spring Boot Expert",
+        "system": (
+            "You are a senior Java and Spring Boot expert. You specialize in: "
+            "Java 21+, Spring Boot 4, Spring Security, JPA/Hibernate, hexagonal architecture, "
+            "SOLID principles, design patterns, REST APIs, WebSocket, testing with JUnit/Mockito. "
+            "You write clean, production-ready Java code following industry best practices. "
+            "When asked to generate code, use FILE: path/to/File.java format. "
+            "When explaining concepts, be concise and include code examples."
+        ),
+    },
+    "angular": {
+        "name": "Angular/TypeScript Expert",
+        "system": (
+            "You are a senior Angular and TypeScript expert. You specialize in: "
+            "Angular 17+, standalone components, signals, RxJS, reactive forms, "
+            "guards, interceptors, services, dependency injection, Angular Material, "
+            "lazy loading, change detection, NgRx state management, testing with Jasmine/Karma. "
+            "You write clean, modular Angular code with proper TypeScript typing. "
+            "When asked to generate code, use FILE: path/to/file.ts format."
+        ),
+    },
+    "react": {
+        "name": "React Expert",
+        "system": (
+            "You are a senior React expert. You specialize in: "
+            "React 18+, hooks (useState, useEffect, useContext, useReducer, useMemo), "
+            "React Router, context API, Redux Toolkit, styled-components, Tailwind CSS, "
+            "Next.js, server components, performance optimization, testing with Jest/RTL. "
+            "You write modern functional React with clean hooks patterns. "
+            "When asked to generate code, use FILE: path/to/Component.jsx format. "
+            "Always include beautiful CSS with modern design."
+        ),
+    },
+    "python": {
+        "name": "Python/FastAPI Expert",
+        "system": (
+            "You are a senior Python expert. You specialize in: "
+            "Python 3.11+, FastAPI, SQLAlchemy, Pydantic, async/await, "
+            "dependency injection, middleware, background tasks, WebSockets, "
+            "testing with pytest, type hints, data modeling, API design. "
+            "You write clean, typed Python following PEP8 and best practices. "
+            "When asked to generate code, use FILE: path/to/file.py format."
+        ),
+    },
+    "dotnet": {
+        "name": ".NET/C# Expert",
+        "system": (
+            "You are a senior C# and .NET expert. You specialize in: "
+            ".NET 8+, ASP.NET Core, Entity Framework Core, LINQ, "
+            "dependency injection, middleware, minimal APIs, Blazor, "
+            "clean architecture, repository pattern, CQRS, MediatR, "
+            "testing with xUnit/NSubstitute. "
+            "You write clean, production-ready C# code. "
+            "When asked to generate code, use FILE: path/to/File.cs format."
+        ),
+    },
+    "node": {
+        "name": "Node.js/Express Expert",
+        "system": (
+            "You are a senior Node.js and Express expert. You specialize in: "
+            "Node.js 20+, Express.js, MongoDB with Mongoose, PostgreSQL with Prisma, "
+            "JWT authentication, middleware, WebSocket with Socket.io, "
+            "REST API design, error handling, validation with Joi/Zod, "
+            "testing with Jest/Supertest. "
+            "You write clean, async Node.js code with proper error handling. "
+            "When asked to generate code, use FILE: path/to/file.js format."
+        ),
+    },
+    "devops": {
+        "name": "DevOps/Infrastructure Expert",
+        "system": (
+            "You are a senior DevOps engineer. You specialize in: "
+            "Docker, Docker Compose, Kubernetes, GitHub Actions, GitLab CI, "
+            "Terraform, AWS (EC2, S3, RDS, ECS, Lambda), Nginx, "
+            "monitoring with Prometheus/Grafana, logging with ELK, "
+            "multi-stage builds, zero-downtime deployments, security hardening. "
+            "You write clean infrastructure code and CI/CD pipelines. "
+            "When asked to generate code, use FILE: path/to/file format."
+        ),
+    },
+    "database": {
+        "name": "Database Expert",
+        "system": (
+            "You are a senior database architect. You specialize in: "
+            "PostgreSQL, MySQL, MongoDB, Redis, Elasticsearch, "
+            "schema design, normalization, indexing, query optimization, "
+            "migrations, replication, sharding, backup strategies, "
+            "ORM patterns (JPA, EF Core, Prisma, Mongoose, SQLAlchemy). "
+            "You design efficient, scalable database schemas. "
+            "When asked to generate code, use FILE: format for migrations/schemas."
+        ),
+    },
+    "security": {
+        "name": "Security Expert",
+        "system": (
+            "You are a senior application security expert. You specialize in: "
+            "OWASP Top 10, JWT/OAuth2/OIDC, input validation, XSS/CSRF/SQLi prevention, "
+            "secrets management, encryption (AES, RSA, bcrypt), SSL/TLS, "
+            "CORS configuration, rate limiting, security headers, "
+            "penetration testing, threat modeling, secure code review. "
+            "You identify vulnerabilities and provide concrete fixes with code."
+        ),
+    },
+    "css": {
+        "name": "CSS/UI Design Expert",
+        "system": (
+            "You are a senior CSS and UI design expert. You specialize in: "
+            "Modern CSS (flexbox, grid, custom properties, container queries), "
+            "animations and transitions, glassmorphism, neumorphism, "
+            "responsive design, mobile-first, dark/light themes, "
+            "Tailwind CSS, SASS/SCSS, CSS-in-JS, design systems, "
+            "accessibility (WCAG), typography, color theory. "
+            "You create beautiful, innovative, production-ready CSS. "
+            "When asked to generate code, use FILE: format for CSS/HTML files. "
+            "Always make designs SPECTACULAR with modern trends."
+        ),
+    },
+    "testing": {
+        "name": "Testing Expert",
+        "system": (
+            "You are a senior QA and testing expert. You specialize in: "
+            "Unit testing (JUnit, Jest, pytest, xUnit), integration testing, "
+            "E2E testing (Cypress, Playwright, Selenium), TDD/BDD, "
+            "mocking (Mockito, NSubstitute, Jest mocks), test patterns, "
+            "code coverage, CI testing pipelines, performance testing, "
+            "test data management, fixture design. "
+            "You write comprehensive, maintainable tests. "
+            "When asked to generate code, use FILE: format for test files."
+        ),
+    },
+}
+
+
+class AskRequest(BaseModel):
+    expert: str
+    question: str
+    project_path: str | None = None
+    files_context: list[dict] | None = None
+    context: dict | None = None
+    lang: str = "es"
+    token: str | None = None
+
+
+@app.get("/experts")
+def list_experts():
+    """List all available expert sub-agents."""
+    return {
+        name: {"name": info["name"]}
+        for name, info in EXPERTS.items()
+    }
+
+
+@app.post("/ask")
+async def ask_expert(req: AskRequest):
+    if req.token:
+        user = validate_token(req.token)
+        if user:
+            rate = check_rate_limit(user["id"], user["plan"])
+            if not rate["allowed"]:
+                raise HTTPException(status_code=429, detail="Daily limit reached.")
+            track_usage(user["id"], "ask")
+
+    expert = EXPERTS.get(req.expert.lower())
+    if not expert:
+        available = ", ".join(sorted(EXPERTS.keys()))
+        raise HTTPException(status_code=400, detail=f"Unknown expert: {req.expert}. Available: {available}")
+
+    lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+    context_block = _build_context_block(req.context)
+    
+    files_info = ""
+    if req.files_context:
+        files_info = "\n\nProject files:\n"
+        for f in req.files_context[:15]:
+            files_info += f"\n--- {f.get('path', 'unknown')} ---\n{f.get('content', '')[:2000]}\n"
+
+    system = expert["system"] + (" " + lang_extra if lang_extra else "") + context_block
+
+    route = get_route("add")  # Use code-quality model
+
+    try:
+        response_text = await call_llm(
+            route, system, req.question + files_info,
+            temperature=0.3, max_tokens=4096
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Expert call failed: {str(e)}")
+
+    parsed_files = _parse_files_from_response(response_text)
+    return {"expert": req.expert, "name": expert["name"], "response": response_text, "files": parsed_files}

@@ -25,7 +25,8 @@ import java.util.Set;
         RegisterCommand.class,
         LoginCommand.class,
         UsageCommand.class,
-        UpgradeCommand.class
+        UpgradeCommand.class,
+        AskCommand.class
     },
     mixinStandardHelpOptions = true
 )
@@ -89,6 +90,7 @@ public class CortexCLI implements Runnable {
         System.out.println("    " + GREEN + "fix" + RESET + " -p /path                   " + DIM + "auto-detect & fix errors" + RESET);
         System.out.println("    " + GREEN + "diagram" + RESET + " -p /path              " + DIM + "ASCII architecture diagram" + RESET);
         System.out.println("    " + GREEN + "watch" + RESET + " -p /path               " + DIM + "auto-review on file changes" + RESET);
+        System.out.println("    " + GREEN + "ask" + RESET + " \"@java implement JWT auth\"  " + DIM + "ask specialized experts" + RESET);
         System.out.println();
         System.out.println("  " + DIM + "Account:" + RESET);
         System.out.println("    " + GREEN + "register" + RESET + " your@email.com");
@@ -139,6 +141,12 @@ public class CortexCLI implements Runnable {
         System.out.println();
         System.out.println("  " + GREEN + "watch" + RESET + " -p /path                  Auto-review on file changes (live)");
         System.out.println("    " + DIM + "Example: watch -p /my-app" + RESET);
+        System.out.println();
+        System.out.println("  " + BOLD + CYAN + "Expert Agents:" + RESET);
+        System.out.println("  " + GREEN + "ask" + RESET + " \"@expert question\"          Ask a specialized expert");
+        System.out.println("    " + DIM + "Experts: @java @angular @react @python @dotnet @node @devops @database @security @css @testing" + RESET);
+        System.out.println("    " + DIM + "Example: ask \"@react create todo list with hooks\"" + RESET);
+        System.out.println("    " + DIM + "Example: ask -p /project --save \"@java add JWT auth\"" + RESET);
         System.out.println();
         System.out.println("  " + BOLD + CYAN + "Account:" + RESET);
         System.out.println("  " + GREEN + "register" + RESET + " <email>             Create account & get token");
@@ -239,7 +247,7 @@ public class CortexCLI implements Runnable {
             Set<String> validCommands = Set.of(
                 "debate", "init", "generate", "create", "add", "review",
                 "health", "context", "diagram", "watch", "register",
-                "login", "usage", "upgrade", "fix"
+                "login", "usage", "upgrade", "fix", "ask"
             );
 
             if (!validCommands.contains(firstWord)) {
