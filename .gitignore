@@ -27,3 +27,8 @@ Thumbs.db
 
 # Cortex generated
 .architect/
+
+# Eclipse
+.classpath
+.project
+.settings/
