@@ -35,6 +35,7 @@ TASK_ROUTING = {
     "fix": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
     "generate": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
     "adr": {"provider": "groq", "model": "llama-3.1-8b-instant"},
+    "chat": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
 }
 
 # Keywords that indicate a complex project

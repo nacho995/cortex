@@ -1391,10 +1391,10 @@ async def chat(req: ChatRequest):
 
     system = CHAT_SYSTEM + (" " + lang_extra if lang_extra else "") + context_block + files_info
 
-    route = get_route("review")  # Use fast model for chat
+    route = get_route("chat")  # Use Claude for intelligent chat
 
     try:
-        response_text = await call_llm(route, system, req.message, temperature=0.5, max_tokens=500)
+        response_text = await call_llm(route, system, req.message, temperature=0.3, max_tokens=2000)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Chat failed: {str(e)}")
 
