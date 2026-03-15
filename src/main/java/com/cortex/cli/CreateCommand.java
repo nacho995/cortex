@@ -12,13 +12,17 @@ import java.util.HashMap;
 import java.util.Map;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 
-@Command(name = "create", description = "Generate code from a description")
+@Command(name = "create", description = "Generate a project from a description")
 public class CreateCommand implements Runnable {
     @Option(names = {"-s", "--server"}, description = "AI service URL", defaultValue = "https://cortex-ai.fly.dev")
     private String server;
-    @Option(names = {"-p", "--project"}, description = "Path to project for context")
+    @Option(names = {"-p", "--project"}, description = "Path to existing project for context")
     private String project;
+    @Option(names = {"-o", "--output"}, description = "Output directory for generated files", required = true)
+    private String output;
     @Option(names = {"-l", "--lang"}, description = "Language code", defaultValue = "es")
     private String lang;
     @Parameters(index = "0", description = "What to build (e.g. 'todo app with Spring Boot')")
@@ -28,6 +32,8 @@ public class CreateCommand implements Runnable {
     private static final String DIM = "\u001B[2m";
     private static final String BOLD = "\u001B[1m";
     private static final String CYAN = "\u001B[38;2;0;200;255m";
+    private static final String GREEN = "\u001B[38;2;0;230;120m";
+    private static final String YELLOW = "\u001B[38;2;255;200;0m";
 
     @Override
     public void run() {
@@ -49,7 +55,8 @@ public class CreateCommand implements Runnable {
             System.out.println();
             System.out.println(BOLD + CYAN + "  CORTEX CREATE" + RESET);
             System.out.println(DIM + "  Prompt: " + prompt + RESET);
-            System.out.println(DIM + "  Generating code..." + RESET);
+            System.out.println(DIM + "  Output: " + output + RESET);
+            System.out.println(DIM + "  Generating project..." + RESET);
             System.out.println();
 
             HttpClient client = HttpClient.newBuilder()
@@ -63,11 +70,50 @@ public class CreateCommand implements Runnable {
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             JsonObject json = gson.fromJson(response.body(), JsonObject.class);
-            
-            if (json.has("code")) {
-                System.out.println(json.get("code").getAsString());
-            } else {
-                System.out.println("\u001B[91m  Error: " + response.body() + RESET);
+
+            if (!json.has("files")) {
+                // Fallback: show raw code if no files parsed
+                if (json.has("code")) {
+                    System.out.println(json.get("code").getAsString());
+                } else {
+                    System.out.println("\u001B[91m  Error: " + response.body() + RESET);
+                }
+                return;
+            }
+
+            JsonArray files = json.getAsJsonArray("files");
+            Path outputDir = Path.of(output);
+            Files.createDirectories(outputDir);
+
+            int count = 0;
+            System.out.println("  " + BOLD + GREEN + "Creating files:" + RESET);
+            System.out.println();
+
+            for (JsonElement elem : files) {
+                JsonObject file = elem.getAsJsonObject();
+                String filePath = file.get("path").getAsString();
+                String content = file.get("content").getAsString();
+
+                Path fullPath = outputDir.resolve(filePath);
+                Files.createDirectories(fullPath.getParent());
+                Files.writeString(fullPath, content);
+
+                System.out.println("    " + GREEN + "+" + RESET + " " + filePath);
+                count++;
+            }
+
+            System.out.println();
+            System.out.println("  " + BOLD + count + " files created" + RESET + " in " + CYAN + outputDir.toAbsolutePath() + RESET);
+            System.out.println();
+
+            // Show tree structure
+            System.out.println("  " + DIM + "Project structure:" + RESET);
+            for (JsonElement elem : files) {
+                String filePath = elem.getAsJsonObject().get("path").getAsString();
+                String[] parts = filePath.split("/");
+                String indent = "    " + "  ".repeat(parts.length - 1);
+                String fileName = parts[parts.length - 1];
+                System.out.println(indent + DIM + fileName + RESET);
             }
             System.out.println();
 

@@ -655,15 +655,58 @@ CREATE_SYSTEM = (
     "The user will describe what they want to build. Generate complete, working code. "
     "RULES: "
     "- Generate ALL files needed for a working project. "
-    "- Output each file with its relative path as a markdown header: ## path/to/File.java "
-    "- Include the full file content in a fenced code block with the correct language tag. "
-    "- Add brief comments explaining key decisions. "
-    "- If the user mentions a framework (Spring Boot, Angular, FastAPI, etc), use it. "
-    "- If no framework is specified, choose the most appropriate one based on the description. "
+    "- For EACH file, use this EXACT format (no exceptions): "
+    "FILE: path/to/FileName.java "
+    "followed by a fenced code block with the correct language tag. "
+    "- Example format: "
+    "FILE: src/main/java/com/app/Main.java "
+    "```java "
+    "package com.app; "
+    "public class Main {} "
+    "``` "
     "- Include configuration files (pom.xml, package.json, requirements.txt, etc). "
     "- Make the code production-ready: proper error handling, validation, clean structure. "
+    "- Every file MUST start with FILE: followed by the relative path. "
     "Write in normal sentence case. NEVER use all caps."
 )
+
+
+def _parse_files_from_response(content: str) -> list[dict]:
+    """Parse FILE: path markers and code blocks from AI response."""
+    files = []
+    lines = content.split("\n")
+    current_path = None
+    current_code = []
+    in_code_block = False
+
+    for line in lines:
+        stripped = line.strip()
+        
+        if stripped.startswith("FILE:"):
+            # Save previous file if any
+            if current_path and current_code:
+                files.append({
+                    "path": current_path,
+                    "content": "\n".join(current_code).strip(),
+                })
+            current_path = stripped[5:].strip()
+            current_code = []
+            in_code_block = False
+        elif stripped.startswith("```") and not in_code_block:
+            in_code_block = True
+        elif stripped == "```" and in_code_block:
+            in_code_block = False
+        elif in_code_block:
+            current_code.append(line)
+
+    # Don't forget the last file
+    if current_path and current_code:
+        files.append({
+            "path": current_path,
+            "content": "\n".join(current_code).strip(),
+        })
+
+    return files
 
 
 @app.post("/create")
@@ -718,4 +761,5 @@ async def create_code(req: CreateRequest):
         data = response.json()
         code_content = data["choices"][0]["message"]["content"]
 
-    return {"code": code_content}
+    parsed_files = _parse_files_from_response(code_content)
+    return {"code": code_content, "files": parsed_files}
