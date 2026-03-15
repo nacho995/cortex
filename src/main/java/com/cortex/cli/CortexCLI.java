@@ -281,9 +281,9 @@ public class CortexCLI implements Runnable {
         }
 
         // ASK intent: pregunta, ask, experto, @expert
-        if (lower.contains("@") || lower.matches(".*(pregunta|experto|expert|consulta).*")) {
+        if (lower.matches(".*\\s@\\w+.*") || lower.startsWith("@") || lower.matches(".*(pregunta|experto|expert|consulta).*")) {
             // Extract @expert if present
-            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("@(\\w+)").matcher(input);
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(?<![\\w.])@(\\w+)").matcher(input);
             if (matcher.find()) {
                 String expert = matcher.group(0);
                 String question = input.replaceFirst("(?i)(preguntale? al experto de \\w+|ask |consulta )?(sobre )?", "");
@@ -563,25 +563,27 @@ public class CortexCLI implements Runnable {
                 // Update session project from command args
                 for (int i = 0; i < cmdArgs.length; i++) {
                     if (("-p".equals(cmdArgs[i]) || "--project".equals(cmdArgs[i])) && i + 1 < cmdArgs.length) {
-                        currentProject = cmdArgs[i + 1];
-                        // Resolve to absolute
-                        if (currentProject.startsWith("~")) {
-                            currentProject = System.getProperty("user.home") + currentProject.substring(1);
+                        String candidateStr = cmdArgs[i + 1];
+                        if (candidateStr.startsWith("~")) {
+                            candidateStr = System.getProperty("user.home") + candidateStr.substring(1);
                         }
-                        java.nio.file.Path p = java.nio.file.Path.of(currentProject).toAbsolutePath();
-                        currentProject = p.toString();
-                        currentProjectName = p.getFileName().toString();
+                        java.nio.file.Path candidate = java.nio.file.Path.of(candidateStr).toAbsolutePath();
+                        if (java.nio.file.Files.isDirectory(candidate)) {
+                            currentProject = candidate.toString();
+                            currentProjectName = candidate.getFileName().toString();
+                        }
                         break;
                     }
-                    // Also detect init command (init /path)
                     if ("init".equals(cmdArgs[0]) && i == 1) {
-                        currentProject = cmdArgs[1];
-                        if (currentProject.startsWith("~")) {
-                            currentProject = System.getProperty("user.home") + currentProject.substring(1);
+                        String candidateStr = cmdArgs[1];
+                        if (candidateStr.startsWith("~")) {
+                            candidateStr = System.getProperty("user.home") + candidateStr.substring(1);
                         }
-                        java.nio.file.Path p = java.nio.file.Path.of(currentProject).toAbsolutePath();
-                        currentProject = p.toString();
-                        currentProjectName = p.getFileName().toString();
+                        java.nio.file.Path candidate = java.nio.file.Path.of(candidateStr).toAbsolutePath();
+                        if (java.nio.file.Files.isDirectory(candidate)) {
+                            currentProject = candidate.toString();
+                            currentProjectName = candidate.getFileName().toString();
+                        }
                         break;
                     }
                 }
