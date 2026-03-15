@@ -1082,3 +1082,61 @@ async def generate_diagram(req: DiagramRequest):
     route = get_route("diagram")
     diagram = await call_llm(route, system, user_msg, temperature=0.3, max_tokens=1000)
     return {"diagram": diagram}
+
+
+class FixRequest(BaseModel):
+    error: str
+    project_path: str
+    files_context: list[dict] | None = None
+    lang: str = "es"
+    token: str | None = None
+
+
+FIX_SYSTEM = (
+    "You are an expert debugger and code fixer. "
+    "The user will give you an error message and the current project files. "
+    "RULES: "
+    "- Analyze the error carefully and identify the root cause. "
+    "- Fix ALL issues, not just the first one. "
+    "- If files are missing, create them with complete working code. "
+    "- If files have syntax errors (unclosed blocks, missing brackets), fix them completely. "
+    "- If imports reference non-existent files, create those files. "
+    "- Keep the same technology stack and coding style as the existing project. "
+    "- For EACH file you fix or create, use: FILE: path/to/file.ext followed by a code block. "
+    "- Include the FULL file content, not just the changed parts. "
+    "- Start with FILE: immediately. No explanations before the code. "
+    "NEVER ask questions. ALWAYS fix the code directly."
+)
+
+
+@app.post("/fix")
+async def fix_code(req: FixRequest):
+    if req.token:
+        user = validate_token(req.token)
+        if user:
+            rate = check_rate_limit(user["id"], user["plan"])
+            if not rate["allowed"]:
+                raise HTTPException(status_code=429, detail="Daily limit reached.")
+            track_usage(user["id"], "fix")
+
+    lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+    system = FIX_SYSTEM + (" " + lang_extra if lang_extra else "")
+
+    # Build context from files
+    files_context = ""
+    if req.files_context:
+        files_context = "\n\nCurrent project files:\n"
+        for f in req.files_context[:25]:
+            files_context += f"\n--- {f.get('path', 'unknown')} ---\n{f.get('content', '')[:3000]}\n"
+
+    user_msg = f"Fix this error:\n\n```\n{req.error}\n```\n{files_context}"
+
+    route = get_route("add")  # Use same model as add (Claude Sonnet for code fixes)
+
+    try:
+        code = await call_llm(route, system, user_msg, temperature=0.2, max_tokens=4096)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {str(e)}")
+
+    parsed_files = _parse_files_from_response(code)
+    return {"code": code, "files": parsed_files}

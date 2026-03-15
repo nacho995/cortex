@@ -15,6 +15,7 @@ import java.util.List;
         GenerateCommand.class,
         CreateCommand.class,
         AddCommand.class,
+        FixCommand.class,
         ReviewCommand.class,
         HealthCommand.class,
         ContextCommand.class,
@@ -84,6 +85,7 @@ public class CortexCLI implements Runnable {
         System.out.println("    " + GREEN + "health" + RESET + " -p /path");
         System.out.println("    " + GREEN + "create" + RESET + " \"todo app with Spring Boot and PostgreSQL\"");
         System.out.println("    " + GREEN + "add" + RESET + " -p /path \"add JWT authentication\"");
+        System.out.println("    " + GREEN + "fix" + RESET + " -p /path \"paste error here\"");
         System.out.println("    " + GREEN + "diagram" + RESET + " -p /path              " + DIM + "ASCII architecture diagram" + RESET);
         System.out.println("    " + GREEN + "watch" + RESET + " -p /path               " + DIM + "auto-review on file changes" + RESET);
         System.out.println();
@@ -125,6 +127,9 @@ public class CortexCLI implements Runnable {
         System.out.println("  " + GREEN + "add" + RESET + " -p /path \"instruction\"    Add features to existing project");
         System.out.println("    " + DIM + "Example: add \"add JWT authentication\"" + RESET);
         System.out.println("    " + DIM + "Example: add -p /my-app \"add unit tests for UserService\"" + RESET);
+        System.out.println();
+        System.out.println("  " + GREEN + "fix" + RESET + " -p /path \"error msg\"        Fix errors by pasting the error");
+        System.out.println("    " + DIM + "Example: fix -p . \"Module not found: ./components/Navbar\"" + RESET);
         System.out.println();
         System.out.println("  " + GREEN + "diagram" + RESET + " -p /path                Generate ASCII architecture diagram");
         System.out.println("    " + DIM + "Example: diagram -p /my-app" + RESET);
