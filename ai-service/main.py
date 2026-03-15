@@ -898,36 +898,42 @@ async def create_code(req: CreateRequest):
         if is_mern:
             parts = [
                 ("BACKEND", (
-                    f"Build ONLY the Node.js/Express/MongoDB BACKEND for: {req.prompt}{debate_info}\n"
-                    "STACK: Node.js + Express.js + MongoDB with Mongoose. NO Java. NO Spring Boot.\n"
-                    "Generate these files:\n"
-                    "FILE: package.json (with express, mongoose, cors, dotenv, bcryptjs, jsonwebtoken dependencies)\n"
-                    "FILE: server.js (Express server with MongoDB connection, CORS, routes)\n"
-                    "FILE: .env.example (MONGO_URI, JWT_SECRET, PORT)\n"
-                    "FILE: config/db.js (MongoDB connection with Mongoose)\n"
-                    "FILE: models/Task.js (Mongoose schema for the main entity)\n"
-                    "FILE: routes/tasks.js (CRUD routes: GET, POST, PUT, DELETE)\n"
-                    "FILE: middleware/auth.js (JWT authentication middleware)\n"
-                    "FILE: routes/auth.js (register, login routes)\n"
-                    "FILE: models/User.js (User schema with bcrypt password hashing)\n"
-                    "Generate COMPLETE working code for each file. Start with FILE: immediately."
+                    f"Generate a Node.js/Express/MongoDB backend for a TODO LIST application.\n"
+                    f"User's description: {req.prompt}\n"
+                    f"{debate_info}\n"
+                    "TECHNOLOGY: Node.js + Express.js + MongoDB + Mongoose. Do NOT use Java.\n\n"
+                    "Generate EXACTLY these files in this order:\n\n"
+                    "FILE: package.json\n"
+                    "FILE: .env.example\n"
+                    "FILE: config/db.js\n"
+                    "FILE: models/Task.js\n"
+                    "FILE: models/User.js\n"
+                    "FILE: middleware/auth.js\n"
+                    "FILE: routes/tasks.js\n"
+                    "FILE: routes/auth.js\n"
+                    "FILE: server.js\n\n"
+                    "IMPORTANT: The main model MUST be called Task (for a todo list app). NOT Post, NOT Producto.\n"
+                    "Start your response with FILE: package.json immediately."
                 )),
                 ("FRONTEND", (
-                    f"Build ONLY the React FRONTEND for: {req.prompt}{debate_info}\n"
-                    "STACK: React with modern hooks and beautiful CSS. NO Angular. NO Vue.\n"
-                    "Generate these files (ALL paths MUST start with client/):\n"
-                    "FILE: client/package.json (with react, react-dom, axios, react-router-dom)\n"
+                    f"Generate a React frontend for a TODO LIST application with BEAUTIFUL innovative CSS.\n"
+                    f"User's description: {req.prompt}\n"
+                    f"{debate_info}\n"
+                    "TECHNOLOGY: React with hooks. Do NOT use Angular or Vue.\n\n"
+                    "Generate EXACTLY these files in this order. EVERY path starts with client/:\n\n"
+                    "FILE: client/package.json\n"
                     "FILE: client/public/index.html\n"
                     "FILE: client/src/index.js\n"
-                    "FILE: client/src/App.jsx (main app with routing)\n"
-                    "FILE: client/src/App.css (BEAUTIFUL innovative CSS: gradients, shadows, animations, glassmorphism, modern design)\n"
-                    "FILE: client/src/components/TaskList.jsx (displays all tasks)\n"
-                    "FILE: client/src/components/TaskItem.jsx (single task with edit/delete)\n"
-                    "FILE: client/src/components/TaskForm.jsx (add new task form)\n"
-                    "FILE: client/src/components/Login.jsx (login form)\n"
-                    "FILE: client/src/components/Register.jsx (register form)\n"
-                    "FILE: client/src/components/Navbar.jsx (navigation bar)\n"
-                    "Generate COMPLETE working code for each file. The CSS must be SPECTACULAR with modern design. Start with FILE: immediately."
+                    "FILE: client/src/App.jsx\n"
+                    "FILE: client/src/App.css\n"
+                    "FILE: client/src/components/TaskList.jsx\n"
+                    "FILE: client/src/components/TaskItem.jsx\n"
+                    "FILE: client/src/components/TaskForm.jsx\n"
+                    "FILE: client/src/components/Navbar.jsx\n"
+                    "FILE: client/src/components/Login.jsx\n"
+                    "FILE: client/src/components/Register.jsx\n\n"
+                    "IMPORTANT: App.css MUST have a spectacular modern design with: gradients, glassmorphism, smooth animations, shadows, rounded corners, dark theme.\n"
+                    "Start your response with FILE: client/package.json immediately."
                 )),
             ]
         else:
@@ -943,7 +949,7 @@ async def create_code(req: CreateRequest):
                 all_code += part_code
             except Exception as e:
                 all_code += f"\n\n# === {part} (error: {str(e)[:200]}) ===\n\n"
-            await asyncio.sleep(3)  # Delay between backend and frontend calls
+            await asyncio.sleep(5)  # Delay between backend and frontend calls
     else:
         # Single call for simpler projects
         try:
@@ -953,6 +959,13 @@ async def create_code(req: CreateRequest):
             )
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"LLM call failed: {str(e)}")
+
+    # Debug logging
+    print(f"[CREATE] Total code length: {len(all_code)}")
+    print(f"[CREATE] Files detected by parser: {len(_parse_files_from_response(all_code))}")
+    print(f"[CREATE] First 200 chars: {all_code[:200]}")
+    if is_fullstack:
+        print(f"[CREATE] Contains '# === FRONTEND': {'FRONTEND' in all_code}")
 
     parsed_files = _parse_files_from_response(all_code)
     return {"code": all_code, "files": parsed_files}
