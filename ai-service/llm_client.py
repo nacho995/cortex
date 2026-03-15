@@ -137,9 +137,20 @@ async def stream_llm(
         async for chunk in _stream_anthropic(url, key, model, system, user_message, temperature, max_tokens, timeout):
             yield chunk
     elif provider == "google":
-        # Google streaming is complex, fall back to non-streaming
-        result = await _call_google(url, key, model, system, user_message, temperature, max_tokens, timeout)
-        yield result
+        # Google doesn't have easy streaming, yield full response
+        try:
+            result = await _call_google(url, key, model, system, user_message, temperature, max_tokens, timeout)
+            yield result
+        except Exception:
+            # Fallback to Groq if Google fails
+            import os
+            groq_key = os.getenv("GROQ_API_KEY", "")
+            async for chunk in _stream_openai_compatible(
+                "https://api.groq.com/openai/v1/chat/completions",
+                groq_key, "llama-3.3-70b-versatile",
+                system, user_message, temperature, max_tokens, timeout
+            ):
+                yield chunk
     else:
         async for chunk in _stream_openai_compatible(url, key, model, system, user_message, temperature, max_tokens, timeout):
             yield chunk

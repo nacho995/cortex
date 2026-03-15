@@ -25,7 +25,7 @@ PROVIDERS = {
 
 # Task → default model routing
 TASK_ROUTING = {
-    "debate": {"provider": "google", "model": "gemini-2.5-pro"},
+    "debate": {"provider": "groq", "model": "llama-3.3-70b-versatile"},
     "review": {"provider": "groq", "model": "llama-3.1-8b-instant"},
     "health": {"provider": "groq", "model": "llama-3.1-8b-instant"},
     "diagram": {"provider": "groq", "model": "llama-3.1-8b-instant"},
