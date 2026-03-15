@@ -1095,15 +1095,18 @@ class FixRequest(BaseModel):
 FIX_SYSTEM = (
     "You are an expert debugger and code fixer. "
     "The user will give you an error message and the current project files. "
-    "RULES: "
-    "- Analyze the error carefully and identify the root cause. "
-    "- Fix ALL issues, not just the first one. "
-    "- If files are missing, create them with complete working code. "
-    "- If files have syntax errors (unclosed blocks, missing brackets), fix them completely. "
-    "- If imports reference non-existent files, create those files. "
-    "- Keep the same technology stack and coding style as the existing project. "
+    "CRITICAL RULES: "
+    "- Analyze ALL errors, not just the first one. "
+    "- You MUST output the COMPLETE file content. NEVER truncate or abbreviate. "
+    "- If a CSS file has 500 lines, output ALL 500 lines including the fix. "
+    "- EVERY opening bracket { MUST have a matching closing bracket }. "
+    "- EVERY CSS property MUST end with a semicolon. "
+    "- If files are missing (Module not found), create them with COMPLETE working code. "
+    "- If files have syntax errors, output the ENTIRE fixed file, not just a patch. "
+    "- Keep the same technology stack, variable names, and coding style. "
     "- For EACH file you fix or create, use: FILE: path/to/file.ext followed by a code block. "
-    "- Include the FULL file content, not just the changed parts. "
+    "- Include the FULL file content from the first line to the last line. "
+    "- Double-check that every file you output is syntactically valid. "
     "- Start with FILE: immediately. No explanations before the code. "
     "NEVER ask questions. ALWAYS fix the code directly."
 )
@@ -1131,10 +1134,10 @@ async def fix_code(req: FixRequest):
 
     user_msg = f"Fix this error:\n\n```\n{req.error}\n```\n{files_context}"
 
-    route = get_route("add")  # Use same model as add (Claude Sonnet for code fixes)
+    route = get_route("fix")  # Use Claude Opus 4 for code fixes (better at long files)
 
     try:
-        code = await call_llm(route, system, user_msg, temperature=0.2, max_tokens=4096)
+        code = await call_llm(route, system, user_msg, temperature=0.2, max_tokens=8192)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM call failed: {str(e)}")
 
