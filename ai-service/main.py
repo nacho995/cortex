@@ -1401,3 +1401,83 @@ async def chat(req: ChatRequest):
 
     parsed_files = _parse_files_from_response(response_text)
     return {"response": response_text, "files": parsed_files}
+
+
+# ============== CODE ENGINE ENDPOINTS ==============
+
+from code_engine import ProjectContext, execute_edit, execute_shell
+
+
+class EditRequest(BaseModel):
+    project_path: str
+    instruction: str
+    conversation_history: list[str] | None = None
+    lang: str = "es"
+    token: str | None = None
+
+
+@app.post("/edit")
+async def edit_code(req: EditRequest):
+    if req.token:
+        user = validate_token(req.token)
+        if user:
+            rate = check_rate_limit(user["id"], user["plan"])
+            if not rate["allowed"]:
+                raise HTTPException(status_code=429, detail="Daily limit reached.")
+            track_usage(user["id"], "edit")
+
+    try:
+        result = await execute_edit(
+            req.project_path,
+            req.instruction,
+            req.conversation_history,
+            req.lang,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Edit failed: {str(e)}")
+
+
+class ShellRequest(BaseModel):
+    project_path: str
+    command: str
+    token: str | None = None
+
+
+@app.post("/shell")
+async def run_shell(req: ShellRequest):
+    if req.token:
+        user = validate_token(req.token)
+        if user:
+            rate = check_rate_limit(user["id"], user["plan"])
+            if not rate["allowed"]:
+                raise HTTPException(status_code=429, detail="Daily limit reached.")
+            track_usage(user["id"], "shell")
+
+    # Security: only allow commands in the project directory
+    if not req.project_path or ".." in req.command:
+        raise HTTPException(status_code=400, detail="Invalid command")
+
+    result = await execute_shell(req.project_path, req.command)
+    return result
+
+
+class AnalyzeRequest(BaseModel):
+    project_path: str
+    token: str | None = None
+
+
+@app.post("/analyze")
+async def analyze_project(req: AnalyzeRequest):
+    """Deep project analysis: structure, issues, dependencies."""
+    ctx = ProjectContext(req.project_path)
+    issues = ctx.get_consistency_issues()
+    
+    return {
+        "type": ctx.project_type,
+        "file_count": len(ctx.files),
+        "tree": ctx.get_tree_string(),
+        "issues": issues,
+        "config": ctx.config,
+        "imports": {k: v for k, v in ctx.imports.items() if v},  # Only files with imports
+    }
