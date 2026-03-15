@@ -952,11 +952,15 @@ async def create_code(req: CreateRequest):
 
         for part, instruction in parts:
             try:
-                part_code = await call_llm(route, system, instruction, temperature=0.3, max_tokens=8192)
+                part_code = await call_llm(route, system, instruction, temperature=0.3, max_tokens=4096)
                 all_code += f"\n\n# === {part} ===\n\n"
                 all_code += part_code
             except Exception as e:
-                all_code += f"\n\n# === {part} (error: {str(e)[:200]}) ===\n\n"
+                import traceback
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                print(f"[CREATE] {part} FAILED: {error_msg}")
+                print(f"[CREATE] Traceback: {traceback.format_exc()[-500:]}")
+                all_code += f"\n\n# === {part} (error: {error_msg[:200]}) ===\n\n"
             await asyncio.sleep(5)  # Delay between backend and frontend calls
     else:
         # Single call for simpler projects

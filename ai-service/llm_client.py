@@ -87,6 +87,7 @@ async def _call_anthropic(
     async with httpx.AsyncClient() as client:
         for attempt in range(3):
             try:
+                print(f"[ANTHROPIC] Calling {model} with max_tokens={max_tokens}")
                 response = await client.post(
                     url,
                     headers={
@@ -105,12 +106,12 @@ async def _call_anthropic(
                     },
                     timeout=timeout,
                 )
+                print(f"[ANTHROPIC] Response status: {response.status_code}")
+                if response.status_code != 200:
+                    print(f"[ANTHROPIC] Error body: {response.text[:300]}")
                 if response.status_code == 429:
                     await asyncio.sleep((attempt + 1) * 5)
                     continue
-                if response.status_code != 200:
-                    error_body = response.text
-                    print(f"[ANTHROPIC ERROR] Status: {response.status_code}, Body: {error_body[:500]}")
                 response.raise_for_status()
                 data = response.json()
                 return data["content"][0]["text"]
