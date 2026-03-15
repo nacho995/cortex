@@ -14,9 +14,12 @@ import java.util.List;
         InitCommand.class,
         GenerateCommand.class,
         CreateCommand.class,
+        AddCommand.class,
         ReviewCommand.class,
         HealthCommand.class,
         ContextCommand.class,
+        DiagramCommand.class,
+        WatchCommand.class,
         RegisterCommand.class,
         LoginCommand.class,
         UsageCommand.class,
@@ -80,6 +83,9 @@ public class CortexCLI implements Runnable {
         System.out.println("    " + GREEN + "review" + RESET + " -p /path src/Main.java");
         System.out.println("    " + GREEN + "health" + RESET + " -p /path");
         System.out.println("    " + GREEN + "create" + RESET + " \"todo app with Spring Boot and PostgreSQL\"");
+        System.out.println("    " + GREEN + "add" + RESET + " -p /path \"add JWT authentication\"");
+        System.out.println("    " + GREEN + "diagram" + RESET + " -p /path              " + DIM + "ASCII architecture diagram" + RESET);
+        System.out.println("    " + GREEN + "watch" + RESET + " -p /path               " + DIM + "auto-review on file changes" + RESET);
         System.out.println();
         System.out.println("  " + DIM + "Account:" + RESET);
         System.out.println("    " + GREEN + "register" + RESET + " your@email.com");
@@ -115,6 +121,16 @@ public class CortexCLI implements Runnable {
         System.out.println("    " + DIM + "Example: create -o ~/dir \"REST API with FastAPI\"" + RESET);
         System.out.println("    " + DIM + "Pro:     create --provider openai --api-key sk-... \"complex app\"" + RESET);
         System.out.println("    " + DIM + "After debate: create --from-debate \"implement the decision\"" + RESET);
+        System.out.println();
+        System.out.println("  " + GREEN + "add" + RESET + " -p /path \"instruction\"    Add features to existing project");
+        System.out.println("    " + DIM + "Example: add \"add JWT authentication\"" + RESET);
+        System.out.println("    " + DIM + "Example: add -p /my-app \"add unit tests for UserService\"" + RESET);
+        System.out.println();
+        System.out.println("  " + GREEN + "diagram" + RESET + " -p /path                Generate ASCII architecture diagram");
+        System.out.println("    " + DIM + "Example: diagram -p /my-app" + RESET);
+        System.out.println();
+        System.out.println("  " + GREEN + "watch" + RESET + " -p /path                  Auto-review on file changes (live)");
+        System.out.println("    " + DIM + "Example: watch -p /my-app" + RESET);
         System.out.println();
         System.out.println("  " + BOLD + CYAN + "Account:" + RESET);
         System.out.println("  " + GREEN + "register" + RESET + " <email>             Create account & get token");

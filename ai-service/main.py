@@ -968,3 +968,175 @@ async def create_code(req: CreateRequest):
 
     parsed_files = _parse_files_from_response(all_code)
     return {"code": all_code, "files": parsed_files}
+
+
+class AddRequest(BaseModel):
+    instruction: str
+    project_path: str
+    files_context: list[dict] | None = None
+    lang: str = "es"
+    token: str | None = None
+    provider: str = "groq"
+    api_key: str | None = None
+    model: str | None = None
+
+
+ADD_SYSTEM = (
+    "You are an expert software engineer modifying an existing project. "
+    "The user will describe what to add or change. You receive the current project files as context. "
+    "RULES: "
+    "- ONLY output files that need to be CREATED or MODIFIED. "
+    "- For EACH file, use this EXACT format: "
+    "FILE: path/to/FileName.ext "
+    "followed by a fenced code block with the correct language tag. "
+    "- Include the FULL file content (not just the changed lines). "
+    "- Keep existing functionality intact unless told otherwise. "
+    "- Follow the project's existing patterns, naming conventions, and structure. "
+    "Write in normal sentence case. NEVER use all caps."
+)
+
+
+@app.post("/add")
+async def add_to_project(req: AddRequest):
+    if req.token:
+        user = validate_token(req.token)
+        if user:
+            rate = check_rate_limit(user["id"], user["plan"])
+            if not rate["allowed"]:
+                raise HTTPException(status_code=429, detail=f"Daily limit reached. Run 'cortex upgrade'.")
+            track_usage(user["id"], "add")
+
+    use_url = GROQ_URL
+    use_key = req.api_key or GROQ_API_KEY
+    use_model = req.model or MODEL
+
+    if req.provider == "openai":
+        use_url = "https://api.openai.com/v1/chat/completions"
+        use_key = req.api_key or os.getenv("OPENAI_API_KEY")
+        use_model = req.model or "gpt-4o-mini"
+
+    if not use_key:
+        raise HTTPException(status_code=500, detail="API key not configured")
+
+    lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+    system = ADD_SYSTEM + (" " + lang_extra if lang_extra else "")
+
+    # Build context from existing files
+    files_context = ""
+    if req.files_context:
+        files_context = "\n\nCurrent project files:\n"
+        for f in req.files_context[:20]:  # Limit to 20 files
+            files_context += f"\n--- {f.get('path', 'unknown')} ---\n{f.get('content', '')[:2000]}\n"
+
+    user_msg = f"Modify this project: {req.instruction}{files_context}"
+
+    async with httpx.AsyncClient() as client:
+        for attempt in range(3):
+            try:
+                response = await client.post(
+                    use_url,
+                    headers={
+                        "Authorization": f"Bearer {use_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": use_model,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "temperature": 0.3,
+                        "max_tokens": 7000,
+                    },
+                    timeout=60.0,
+                )
+                if response.status_code == 429:
+                    await asyncio.sleep((attempt + 1) * 5)
+                    continue
+                response.raise_for_status()
+                data = response.json()
+                code_content = data["choices"][0]["message"]["content"]
+                break
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < 2:
+                    await asyncio.sleep((attempt + 1) * 5)
+                    continue
+                raise
+        else:
+            raise HTTPException(status_code=429, detail="Rate limited after retries")
+
+    parsed_files = _parse_files_from_response(code_content)
+    return {"code": code_content, "files": parsed_files}
+
+
+class DiagramRequest(BaseModel):
+    context: dict
+    lang: str = "es"
+    token: str | None = None
+
+
+DIAGRAM_SYSTEM = (
+    "You are an expert at creating ASCII architecture diagrams. "
+    "You receive a project's context (languages, frameworks, dependencies, structure). "
+    "Generate a clear ASCII diagram showing: "
+    "- Main components/layers and how they connect "
+    "- Databases, external services, APIs "
+    "- Data flow direction with arrows (-->, <--) "
+    "- Use box drawing characters: ┌ ┐ └ ┘ │ ─ ┬ ┴ ├ ┤ "
+    "- Keep it under 30 lines wide and 20 lines tall "
+    "- Add a brief legend if needed "
+    "ONLY output the diagram, no explanations before or after. "
+    "Write labels in normal sentence case."
+)
+
+
+@app.post("/diagram")
+async def generate_diagram(req: DiagramRequest):
+    if req.token:
+        user = validate_token(req.token)
+        if user:
+            rate = check_rate_limit(user["id"], user["plan"])
+            if not rate["allowed"]:
+                raise HTTPException(status_code=429, detail="Daily limit reached.")
+            track_usage(user["id"], "diagram")
+
+    lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+    context_block = _build_context_block(req.context)
+    system = DIAGRAM_SYSTEM + (" " + lang_extra if lang_extra else "")
+
+    user_msg = f"Generate an ASCII architecture diagram for this project:{context_block}"
+
+    async with httpx.AsyncClient() as client:
+        for attempt in range(3):
+            try:
+                response = await client.post(
+                    GROQ_URL,
+                    headers={
+                        "Authorization": f"Bearer {GROQ_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": MODEL,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "temperature": 0.3,
+                        "max_tokens": 1000,
+                    },
+                    timeout=30.0,
+                )
+                if response.status_code == 429:
+                    await asyncio.sleep((attempt + 1) * 5)
+                    continue
+                response.raise_for_status()
+                data = response.json()
+                diagram = data["choices"][0]["message"]["content"]
+                return {"diagram": diagram}
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < 2:
+                    await asyncio.sleep((attempt + 1) * 5)
+                    continue
+                raise
+
+    raise HTTPException(status_code=429, detail="Rate limited")
