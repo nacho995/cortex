@@ -6,6 +6,7 @@ import java.io.Console;
 import java.util.Scanner;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 @Command(name = "cortex", version = "0.1.0",
     description = "AI Architecture Decision Engine",
@@ -231,6 +232,21 @@ public class CortexCLI implements Runnable {
 
             // Parse and execute the command
             String[] cmdArgs = parseArgs(line);
+            if (cmdArgs.length == 0) continue;
+
+            // Only process valid commands, ignore everything else
+            String firstWord = cmdArgs[0].toLowerCase();
+            Set<String> validCommands = Set.of(
+                "debate", "init", "generate", "create", "add", "review",
+                "health", "context", "diagram", "watch", "register",
+                "login", "usage", "upgrade", "fix"
+            );
+
+            if (!validCommands.contains(firstWord)) {
+                // Silently ignore non-command input (pasted errors, etc)
+                continue;
+            }
+
             try {
                 new CommandLine(new CortexCLI()).execute(cmdArgs);
             } catch (Exception e) {
