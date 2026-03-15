@@ -758,29 +758,24 @@ class CreateRequest(BaseModel):
 
 
 CREATE_SYSTEM = (
-    "You are an expert software engineer and code generator. "
-    "The user will describe what they want to build. Generate complete, working code IMMEDIATELY. "
-    "CRITICAL RULES: "
-    "- NEVER ask questions. NEVER ask for clarification. NEVER ask for more details. ALWAYS generate code directly. "
-    "- If the description is vague, make reasonable assumptions and generate anyway. "
-    "- You MUST use the EXACT technology stack the user specifies. "
-    "- If the user says MERN, you MUST generate MongoDB + Express.js + React + Node.js files. NEVER generate Java or Spring Boot for MERN. "
-    "- If the user says Spring Boot, you generate Java + Spring Boot. "
-    "- If the user says FastAPI, you generate Python + FastAPI. "
-    "- If no stack is specified, choose the most appropriate one for the description. "
-    "- NEVER substitute a different stack than what the user asked for. "
-    "- Generate ALL files needed for a complete working project. "
-    "- For EACH file, use this EXACT format (no exceptions): "
-    "FILE: path/to/FileName.ext "
-    "followed by a fenced code block with the correct language tag. "
-    "- For a MERN project, generate files like: package.json, server.js, models/*.js, routes/*.js, client/src/App.jsx, client/src/index.css, client/package.json, etc. "
-    "- Include configuration files (package.json, .env.example, etc). "
-    "- Include proper CSS with modern design (flexbox, grid, animations, gradients, shadows). "
-    "- Make the code production-ready: proper error handling, validation, clean structure. "
-    "- Every file MUST start with FILE: followed by the relative path. "
-    "- Start generating FILE: blocks immediately. No introductions, no questions, no explanations before the code. "
-    "- Your first line of output MUST be FILE: followed by the first file path. "
-    "Write in normal sentence case. NEVER use all caps."
+    "You are an expert software engineer. Generate complete, working code following SOLID principles. "
+    "ARCHITECTURE RULES: "
+    "- Follow Single Responsibility: each file does ONE thing. "
+    "- No file should exceed 80 lines. Split large files into smaller modules. "
+    "- For React: each component gets its OWN folder with ComponentName.jsx and ComponentName.css. "
+    "- For CSS: use CSS Modules or separate small CSS files per component. NEVER one giant App.css. "
+    "- App.css should ONLY contain CSS variables (:root), reset, and body styles (max 30 lines). "
+    "- For Node/Express: separate routes, controllers, models, middleware into individual files. "
+    "- For Java/Spring: follow hexagonal architecture with ports/adapters. "
+    "TECH STACK RULES: "
+    "- Use the EXACT technology stack the user specifies. "
+    "- If MERN: MongoDB + Express.js + React + Node.js. NEVER Java. "
+    "- If Spring Boot: Java. If FastAPI: Python. "
+    "FILE FORMAT RULES: "
+    "- For EACH file use: FILE: path/to/File.ext followed by a code block. "
+    "- Your first output line MUST be FILE: "
+    "- NEVER ask questions. Generate code immediately. "
+    "- Every file must be syntactically valid and complete."
 )
 
 
@@ -906,42 +901,49 @@ async def create_code(req: CreateRequest):
         if is_mern:
             parts = [
                 ("BACKEND", (
-                    f"Generate a Node.js/Express/MongoDB backend for a TODO LIST application.\n"
-                    f"User's description: {req.prompt}\n"
+                    f"Generate Node.js/Express/MongoDB backend for: {req.prompt}\n"
                     f"{debate_info}\n"
-                    "TECHNOLOGY: Node.js + Express.js + MongoDB + Mongoose. Do NOT use Java.\n\n"
-                    "Generate EXACTLY these files in this order:\n\n"
+                    "STACK: Node.js + Express + MongoDB + Mongoose. NOT Java.\n"
+                    "SOLID: Each file does ONE thing. Max 80 lines per file.\n"
+                    "Generate these files:\n"
                     "FILE: package.json\n"
                     "FILE: .env.example\n"
-                    "FILE: config/db.js\n"
-                    "FILE: models/Task.js\n"
-                    "FILE: models/User.js\n"
-                    "FILE: middleware/auth.js\n"
-                    "FILE: routes/tasks.js\n"
-                    "FILE: routes/auth.js\n"
-                    "FILE: server.js\n\n"
-                    "IMPORTANT: The main model MUST be called Task (for a todo list app). NOT Post, NOT Producto.\n"
-                    "Start your response with FILE: package.json immediately."
+                    "FILE: config/db.js (MongoDB connection only)\n"
+                    "FILE: models/Task.js (Mongoose Task schema only)\n"
+                    "FILE: models/User.js (Mongoose User schema only)\n"
+                    "FILE: middleware/auth.js (JWT middleware only)\n"
+                    "FILE: routes/tasks.js (Task CRUD routes only)\n"
+                    "FILE: routes/auth.js (Auth routes only)\n"
+                    "FILE: server.js (Express setup, max 40 lines)\n"
+                    "Start with FILE: package.json immediately."
                 )),
                 ("FRONTEND", (
-                    f"Generate a React frontend for a TODO LIST application with BEAUTIFUL innovative CSS.\n"
-                    f"User's description: {req.prompt}\n"
+                    f"Generate React frontend for: {req.prompt}\n"
                     f"{debate_info}\n"
-                    "TECHNOLOGY: React with hooks. Do NOT use Angular or Vue.\n\n"
-                    "Generate EXACTLY these files in this order. EVERY path starts with client/:\n\n"
+                    "STACK: React with hooks. NOT Angular.\n"
+                    "SOLID: Each component in its OWN folder with its OWN CSS file.\n"
+                    "App.css has ONLY :root variables, reset, body (max 30 lines).\n"
+                    "Each component CSS is max 40 lines with modern design.\n\n"
+                    "Generate these files:\n"
                     "FILE: client/package.json\n"
                     "FILE: client/public/index.html\n"
                     "FILE: client/src/index.js\n"
-                    "FILE: client/src/App.jsx\n"
-                    "FILE: client/src/App.css\n"
-                    "FILE: client/src/components/TaskList.jsx\n"
-                    "FILE: client/src/components/TaskItem.jsx\n"
-                    "FILE: client/src/components/TaskForm.jsx\n"
-                    "FILE: client/src/components/Navbar.jsx\n"
-                    "FILE: client/src/components/Login.jsx\n"
-                    "FILE: client/src/components/Register.jsx\n\n"
-                    "IMPORTANT: App.css MUST have a spectacular modern design with: gradients, glassmorphism, smooth animations, shadows, rounded corners, dark theme.\n"
-                    "Start your response with FILE: client/package.json immediately."
+                    "FILE: client/src/App.jsx (routing only, max 30 lines)\n"
+                    "FILE: client/src/App.css (variables and reset ONLY, max 30 lines)\n"
+                    "FILE: client/src/components/Navbar/Navbar.jsx\n"
+                    "FILE: client/src/components/Navbar/Navbar.css\n"
+                    "FILE: client/src/components/TaskList/TaskList.jsx\n"
+                    "FILE: client/src/components/TaskList/TaskList.css\n"
+                    "FILE: client/src/components/TaskForm/TaskForm.jsx\n"
+                    "FILE: client/src/components/TaskForm/TaskForm.css\n"
+                    "FILE: client/src/components/TaskItem/TaskItem.jsx\n"
+                    "FILE: client/src/components/TaskItem/TaskItem.css\n"
+                    "FILE: client/src/components/Auth/Login.jsx\n"
+                    "FILE: client/src/components/Auth/Login.css\n"
+                    "FILE: client/src/components/Auth/Register.jsx\n"
+                    "FILE: client/src/components/Auth/Register.css\n"
+                    "CSS design: glassmorphism, gradients, smooth animations, dark theme.\n"
+                    "Start with FILE: client/package.json immediately."
                 )),
             ]
         else:
@@ -996,17 +998,14 @@ class AddRequest(BaseModel):
 
 ADD_SYSTEM = (
     "You are an expert software engineer modifying an existing project. "
-    "The user will describe what to add or change. You receive the current project files as context. "
-    "CRITICAL RULES: "
+    "RULES: "
+    "- Follow SOLID: each file does ONE thing, max 80 lines. "
     "- ONLY output files that need to be CREATED or MODIFIED. "
-    "- KEEP the same technology stack as the existing project. Do NOT switch stacks. "
-    "- For EACH file, use this EXACT format: "
-    "FILE: path/to/FileName.ext "
-    "followed by a fenced code block with the correct language tag. "
-    "- Include the FULL file content (not just the changed lines). "
-    "- Keep existing functionality intact unless told otherwise. "
-    "- Follow the project's existing patterns, naming conventions, and structure. "
-    "Write in normal sentence case. NEVER use all caps."
+    "- Keep the same technology stack. Do NOT switch stacks. "
+    "- For React: each new component gets its own folder with .jsx and .css "
+    "- For EACH file: FILE: path/to/file.ext followed by COMPLETE code block. "
+    "- Include FULL file content, not patches. "
+    "NEVER ask questions. Generate code directly."
 )
 
 
@@ -1093,22 +1092,17 @@ class FixRequest(BaseModel):
 
 
 FIX_SYSTEM = (
-    "You are an expert debugger and code fixer. "
-    "The user will give you an error message and the current project files. "
-    "CRITICAL RULES: "
-    "- Analyze ALL errors, not just the first one. "
-    "- You MUST output the COMPLETE file content. NEVER truncate or abbreviate. "
-    "- If a CSS file has 500 lines, output ALL 500 lines including the fix. "
-    "- EVERY opening bracket { MUST have a matching closing bracket }. "
-    "- EVERY CSS property MUST end with a semicolon. "
-    "- If files are missing (Module not found), create them with COMPLETE working code. "
-    "- If files have syntax errors, output the ENTIRE fixed file, not just a patch. "
-    "- Keep the same technology stack, variable names, and coding style. "
-    "- For EACH file you fix or create, use: FILE: path/to/file.ext followed by a code block. "
-    "- Include the FULL file content from the first line to the last line. "
-    "- Double-check that every file you output is syntactically valid. "
-    "- Start with FILE: immediately. No explanations before the code. "
-    "NEVER ask questions. ALWAYS fix the code directly."
+    "You are an expert debugger. Fix errors following SOLID principles. "
+    "RULES: "
+    "- Analyze ALL errors at once, not one at a time. "
+    "- Output COMPLETE files, never truncated. "
+    "- If a file is too long (>80 lines), split it into smaller files. "
+    "- Every bracket { must have a matching }. Every CSS property ends with ; "
+    "- If components are missing, create them in their own folder: Component/Component.jsx + Component.css "
+    "- Keep the same tech stack and coding style. "
+    "- For EACH file: FILE: path/to/file.ext followed by a complete code block. "
+    "- Start with FILE: immediately. No explanations. "
+    "NEVER ask questions. Fix everything directly."
 )
 
 
@@ -1137,7 +1131,7 @@ async def fix_code(req: FixRequest):
     route = get_route("fix")  # Use Claude Opus 4 for code fixes (better at long files)
 
     try:
-        code = await call_llm(route, system, user_msg, temperature=0.2, max_tokens=8192)
+        code = await call_llm(route, system, user_msg, temperature=0.2, max_tokens=4096)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM call failed: {str(e)}")
 
