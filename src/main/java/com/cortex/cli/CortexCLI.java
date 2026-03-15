@@ -75,7 +75,7 @@ public class CortexCLI implements Runnable {
         System.out.println("    " + GREEN + "init" + RESET + " /path/to/your/project");
         System.out.println("    " + GREEN + "review" + RESET + " -p /path src/Main.java");
         System.out.println("    " + GREEN + "health" + RESET + " -p /path");
-        System.out.println("    " + GREEN + "create" + RESET + " -o ~/my-project \"todo app with Spring Boot\"");
+        System.out.println("    " + GREEN + "create" + RESET + " \"todo app with Spring Boot and PostgreSQL\"");
         System.out.println();
     }
 
@@ -102,8 +102,9 @@ public class CortexCLI implements Runnable {
         System.out.println("  " + GREEN + "context" + RESET + " -p /path                Show current project context");
         System.out.println("    " + DIM + "Example: context -p /my-app" + RESET);
         System.out.println();
-System.out.println("  " + GREEN + "create" + RESET + " -o /dir \"description\"    Generate project from description");
-System.out.println("    " + DIM + "Example: create -o ~/todo \"todo app with Spring Boot and PostgreSQL\"" + RESET);
+        System.out.println("  " + GREEN + "create" + RESET + " \"description\"            Generate project in current dir");
+        System.out.println("    " + DIM + "Example: create \"todo app with MERN stack\"" + RESET);
+        System.out.println("    " + DIM + "Example: create -o ~/other-dir \"REST API with FastAPI\"" + RESET);
         System.out.println();
         System.out.println("  " + YELLOW + "help" + RESET + "                            Show this help");
         System.out.println("  " + YELLOW + "clear" + RESET + "                           Clear the screen");

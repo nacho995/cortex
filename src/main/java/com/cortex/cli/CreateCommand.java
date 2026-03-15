@@ -21,7 +21,7 @@ public class CreateCommand implements Runnable {
     private String server;
     @Option(names = {"-p", "--project"}, description = "Path to existing project for context")
     private String project;
-    @Option(names = {"-o", "--output"}, description = "Output directory for generated files", required = true)
+    @Option(names = {"-o", "--output"}, description = "Output directory (default: current directory)", defaultValue = ".")
     private String output;
     @Option(names = {"-l", "--lang"}, description = "Language code", defaultValue = "es")
     private String lang;
