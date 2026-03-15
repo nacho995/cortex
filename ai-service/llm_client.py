@@ -119,6 +119,108 @@ async def _call_anthropic(
     raise Exception("Rate limited after retries")
 
 
+async def stream_llm(
+    route: dict,
+    system: str,
+    user_message: str,
+    temperature: float = 0.7,
+    max_tokens: int = 1000,
+    timeout: float = 60.0,
+):
+    """Stream tokens from any LLM provider. Yields text chunks."""
+    provider = route["provider"]
+    model = route["model"]
+    url = route["url"]
+    key = route["key"]
+
+    if provider == "anthropic":
+        async for chunk in _stream_anthropic(url, key, model, system, user_message, temperature, max_tokens, timeout):
+            yield chunk
+    elif provider == "google":
+        # Google streaming is complex, fall back to non-streaming
+        result = await _call_google(url, key, model, system, user_message, temperature, max_tokens, timeout)
+        yield result
+    else:
+        async for chunk in _stream_openai_compatible(url, key, model, system, user_message, temperature, max_tokens, timeout):
+            yield chunk
+
+
+async def _stream_openai_compatible(url, key, model, system, user_message, temperature, max_tokens, timeout):
+    """Stream from OpenAI-compatible APIs (OpenAI, Groq)."""
+    import json as json_mod
+    async with httpx.AsyncClient() as client:
+        async with client.stream(
+            "POST",
+            url,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_message},
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": True,
+            },
+            timeout=timeout,
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data = line[6:]
+                    if data.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json_mod.loads(data)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    except (json_mod.JSONDecodeError, IndexError, KeyError):
+                        continue
+
+
+async def _stream_anthropic(url, key, model, system, user_message, temperature, max_tokens, timeout):
+    """Stream from Anthropic Claude API."""
+    import json as json_mod
+    async with httpx.AsyncClient() as client:
+        async with client.stream(
+            "POST",
+            url,
+            headers={
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "max_tokens": max_tokens,
+                "system": system,
+                "messages": [
+                    {"role": "user", "content": user_message},
+                ],
+                "temperature": temperature,
+                "stream": True,
+            },
+            timeout=timeout,
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    try:
+                        data = json_mod.loads(line[6:])
+                        if data.get("type") == "content_block_delta":
+                            text = data.get("delta", {}).get("text", "")
+                            if text:
+                                yield text
+                    except (json_mod.JSONDecodeError, KeyError):
+                        continue
+
+
 async def _call_google(
     url: str,
     key: str,

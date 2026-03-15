@@ -9,7 +9,9 @@ from dotenv import load_dotenv
 from scanner import scan_project
 from auth import register_user, validate_token, check_rate_limit, track_usage, get_usage_stats, upgrade_plan, PLANS
 from router import get_route, detect_complexity
-from llm_client import call_llm
+from fastapi.responses import StreamingResponse
+import json as json_module
+from llm_client import call_llm, stream_llm
 
 load_dotenv()
 
@@ -375,6 +377,126 @@ async def debate(req: DebateRequest):
     }
 
 
+@app.post("/debate-stream")
+async def debate_stream(req: DebateRequest):
+    """Streaming version of debate — sends SSE events as agents respond."""
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    if req.token:
+        user = validate_token(req.token)
+        if user:
+            rate = check_rate_limit(user["id"], user["plan"])
+            if not rate["allowed"]:
+                raise HTTPException(status_code=429, detail="Daily limit reached.")
+            track_usage(user["id"], "debate")
+
+    num_rounds = max(1, min(req.rounds, 5))
+    active_agents = AGENTS
+    custom = _load_custom_agents(req.agents_dir) if hasattr(req, 'agents_dir') and req.agents_dir else []
+    if custom:
+        active_agents = AGENTS + custom
+
+    async def event_generator():
+        debate_history = ""
+        all_rounds = []
+
+        for round_num in range(1, num_rounds + 1):
+            if round_num == 1:
+                round_label = "ROUND 1"
+            elif round_num < num_rounds:
+                round_label = f"ROUND {round_num}"
+            else:
+                round_label = "FINAL ROUND - VERDICT"
+
+            yield f"data: {json_module.dumps({'type': 'round_start', 'round': round_num, 'label': round_label})}\n\n"
+
+            round_results = []
+
+            if round_num == 1:
+                round_instruction = f"Debate this topic: {req.topic}"
+            elif round_num < num_rounds:
+                round_instruction = (
+                    f"This is round {round_num} of the debate on: {req.topic}\n\n"
+                    f"Here are the arguments from the previous round(s):\n{debate_history}\n\n"
+                    "Now respond to the other agents' arguments. Challenge weak points, "
+                    "acknowledge good arguments, and refine your position. "
+                    "Address other agents by name when responding to them."
+                )
+            else:
+                round_instruction = (
+                    f"This is the FINAL round of the debate on: {req.topic}\n\n"
+                    f"Here is the full debate so far:\n{debate_history}\n\n"
+                    "Give your final verdict. You MUST start your response with exactly one of these words: "
+                    "APPROVE, REJECT, or CONDITIONAL. Then explain your final position in 2-3 sentences. "
+                    "Try to find common ground with other agents where possible."
+                )
+
+            for agent in active_agents:
+                yield f"data: {json_module.dumps({'type': 'agent_start', 'name': agent['name'], 'role': agent['role']})}\n\n"
+
+                lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
+                context_block = _build_context_block(req.context)
+                system_prompt = agent["system"] + (" " + lang_extra if lang_extra else "") + context_block
+
+                route = get_route("debate")
+                full_text = ""
+
+                try:
+                    async for token in stream_llm(route, system_prompt, round_instruction, temperature=0.8, max_tokens=300):
+                        full_text += token
+                        yield f"data: {json_module.dumps({'type': 'token', 'content': token})}\n\n"
+                except Exception as e:
+                    full_text = f"Agent failed: {str(e)[:200]}"
+                    yield f"data: {json_module.dumps({'type': 'token', 'content': full_text})}\n\n"
+
+                round_results.append({
+                    "name": agent["name"],
+                    "role": agent["role"],
+                    "argument": full_text,
+                })
+
+                yield f"data: {json_module.dumps({'type': 'agent_end', 'name': agent['name']})}\n\n"
+                await asyncio.sleep(2.0)
+
+            round_text = f"\n--- Round {round_num} ---\n"
+            for r in round_results:
+                round_text += f"\n[{r['name']}]: {r['argument']}\n"
+            debate_history += round_text
+            all_rounds.append({"round": round_num, "agents": round_results})
+
+            yield f"data: {json_module.dumps({'type': 'round_end', 'round': round_num})}\n\n"
+
+        # Consensus from final round
+        final_round = all_rounds[-1]["agents"] if all_rounds else []
+        approve_words = {"approve", "apruebo", "aprobado", "approuvé", "aprovado"}
+        reject_words = {"reject", "rechazo", "rechazado", "rejeté", "rejeitado"}
+        conditional_words = {"conditional", "condicional", "conditionnel"}
+        votes = {"approve": 0, "reject": 0, "conditional": 0}
+
+        for agent_result in final_round:
+            arg_lower = agent_result["argument"].lower().strip()
+            first_word = arg_lower.split()[0].rstrip(".:,;") if arg_lower else ""
+            if first_word in approve_words or arg_lower.startswith("approve"):
+                votes["approve"] += 1
+            elif first_word in reject_words or arg_lower.startswith("reject"):
+                votes["reject"] += 1
+            elif first_word in conditional_words or arg_lower.startswith("conditional"):
+                votes["conditional"] += 1
+
+        total = len(final_round)
+        level = ("unanimous" if votes["approve"] == total else
+                 "strong" if votes["approve"] >= total * 0.75 else
+                 "majority" if votes["approve"] + votes["conditional"] > total * 0.5 else
+                 "divided")
+
+        consensus = {"votes": votes, "total": total, "level": level}
+        yield f"data: {json_module.dumps({'type': 'consensus', 'consensus': consensus})}\n\n"
+        yield f"data: {json_module.dumps({'type': 'done', 'topic': req.topic})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
 class InitRequest(BaseModel):
     path: str
 
@@ -595,8 +717,6 @@ HEALTH_SYSTEM = (
 @app.post("/health-check")
 async def health_check(req: HealthRequest):
     _resolve_user_and_model(req.token, "health-check")
-
-    import json as json_module
 
     lang_extra = LANG_INSTRUCTION.get(req.lang, f"You MUST respond entirely in the language with code '{req.lang}'.")
     context_block = _build_context_block(req.context)

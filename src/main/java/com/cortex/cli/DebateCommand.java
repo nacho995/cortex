@@ -101,130 +101,110 @@ public class DebateCommand implements Runnable {
 
             HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(server + "/debate"))
+                    .uri(URI.create(server + "/debate-stream"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            DebateResponse debateResponse = gson.fromJson(response.body(), DebateResponse.class);
-
-            if (debateResponse == null || debateResponse.getRounds() == null) {
-                System.out.println("\u001B[91mError: Could not parse response from AI service.\u001B[0m");
+            HttpResponse<java.io.InputStream> response = client.send(request, 
+                HttpResponse.BodyHandlers.ofInputStream());
+            
+            if (response.statusCode() != 200) {
+                String errorBody = new String(response.body().readAllBytes());
+                System.out.println("\u001B[91m  Error (" + response.statusCode() + "): " + errorBody + RESET);
                 return;
             }
 
-            // Display each round
-            for (RoundResult round : debateResponse.getRounds()) {
-                String roundLabel;
-                if (round.getRound() == debateResponse.getRounds().size()) {
-                    roundLabel = "FINAL ROUND - VERDICT";
-                } else {
-                    roundLabel = "ROUND " + round.getRound();
-                }
-                System.out.println(BOLD + "\u001B[38;2;180;180;180m" + "  ╔══════════════════════════════════════════════════════════╗" + RESET);
-                System.out.printf(BOLD + "\u001B[38;2;180;180;180m" + "  ║  %-56s║%n" + RESET, roundLabel);
-                System.out.println(BOLD + "\u001B[38;2;180;180;180m" + "  ╚══════════════════════════════════════════════════════════╝" + RESET);
-                System.out.println();
-
-                for (Agent agent : round.getAgents()) {
-                    String color = agentColor(agent.getRole());
-                    String vote = (agent.getVote() != null) ? " " + voteSymbol(agent.getVote()) : "";
-                    System.out.println("  " + color + "━".repeat(58) + RESET);
-                    System.out.printf("  %s[%s]%s %s(%s)%s%s%n", color, agent.getName().toUpperCase(), RESET, DIM, agent.getRole(), RESET, vote);
-                    System.out.println("  " + color + "━".repeat(58) + RESET);
-                    // Indent argument text
-                    for (String line : agent.getArgument().split("\n")) {
-                        System.out.println("  " + line);
+            // Read SSE stream
+            java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(response.body()));
+            
+            String line;
+            String currentAgent = "";
+            
+            while ((line = reader.readLine()) != null) {
+                if (!line.startsWith("data: ")) continue;
+                String data = line.substring(6).trim();
+                if (data.isEmpty()) continue;
+                
+                try {
+                    com.google.gson.JsonObject event = gson.fromJson(data, com.google.gson.JsonObject.class);
+                    String type = event.get("type").getAsString();
+                    
+                    switch (type) {
+                        case "round_start" -> {
+                            String label = event.get("label").getAsString();
+                            System.out.println();
+                            System.out.println(BOLD + "\u001B[38;2;180;180;180m" + "  ╔══════════════════════════════════════════════════════════╗" + RESET);
+                            System.out.printf(BOLD + "\u001B[38;2;180;180;180m" + "  ║  %-56s║%n" + RESET, label);
+                            System.out.println(BOLD + "\u001B[38;2;180;180;180m" + "  ╚══════════════════════════════════════════════════════════╝" + RESET);
+                            System.out.println();
+                        }
+                        case "agent_start" -> {
+                            String name = event.get("name").getAsString();
+                            String role = event.get("role").getAsString();
+                            String color = agentColor(role);
+                            currentAgent = name;
+                            System.out.println("  " + color + "━".repeat(58) + RESET);
+                            System.out.printf("  %s[%s]%s %s(%s)%s%n", color, name.toUpperCase(), RESET, DIM, role, RESET);
+                            System.out.println("  " + color + "━".repeat(58) + RESET);
+                            System.out.print("  ");
+                        }
+                        case "token" -> {
+                            String content = event.get("content").getAsString();
+                            // Handle newlines in the content
+                            String formatted = content.replace("\n", "\n  ");
+                            System.out.print(formatted);
+                            System.out.flush();
+                        }
+                        case "agent_end" -> {
+                            System.out.println();
+                            System.out.println();
+                        }
+                        case "consensus" -> {
+                            com.google.gson.JsonObject consensus = event.getAsJsonObject("consensus");
+                            com.google.gson.JsonObject votes = consensus.getAsJsonObject("votes");
+                            int total = consensus.get("total").getAsInt();
+                            int approve = votes.has("approve") ? votes.get("approve").getAsInt() : 0;
+                            int conditional = votes.has("conditional") ? votes.get("conditional").getAsInt() : 0;
+                            int reject = votes.has("reject") ? votes.get("reject").getAsInt() : 0;
+                            String level = consensus.get("level").getAsString();
+                            
+                            System.out.println(BOLD + "\u001B[38;2;255;215;0m" + "  ╔══════════════════════════════════════════════════════════╗" + RESET);
+                            System.out.println(BOLD + "\u001B[38;2;255;215;0m" + "  ║  CONSENSUS                                               ║" + RESET);
+                            System.out.println(BOLD + "\u001B[38;2;255;215;0m" + "  ╚══════════════════════════════════════════════════════════╝" + RESET);
+                            System.out.println();
+                            
+                            int barLen = 40;
+                            int greenLen = total > 0 ? (approve * barLen / total) : 0;
+                            int yellowLen = total > 0 ? (conditional * barLen / total) : 0;
+                            int redLen = barLen - greenLen - yellowLen;
+                            String bar = "\u001B[42m" + " ".repeat(greenLen) + "\u001B[43m" + " ".repeat(yellowLen) + "\u001B[41m" + " ".repeat(redLen) + RESET;
+                            System.out.println("  " + bar);
+                            System.out.printf("  \u001B[32m%d APPROVE\u001B[0m  \u001B[33m%d CONDITIONAL\u001B[0m  \u001B[91m%d REJECT\u001B[0m  (of %d)%n", approve, conditional, reject, total);
+                            
+                            String levelColor = switch (level) {
+                                case "unanimous", "strong" -> "\u001B[32m";
+                                case "majority" -> "\u001B[33m";
+                                default -> "\u001B[91m";
+                            };
+                            System.out.println("  Level: " + levelColor + BOLD + level.toUpperCase() + RESET);
+                            System.out.println();
+                        }
+                        case "done" -> {
+                            // Save debate for --from-debate
+                            Path debateFile = Path.of(System.getProperty("user.home"), ".cortex", "last-debate.json");
+                            Files.createDirectories(debateFile.getParent());
+                            Files.writeString(debateFile, data);
+                            System.out.println("  " + DIM + "Debate saved. Use 'create --from-debate' to generate code." + RESET);
+                            System.out.println();
+                        }
                     }
-                    System.out.println();
+                } catch (Exception e) {
+                    // Skip unparseable events
                 }
             }
-
-            // Display consensus
-            Consensus consensus = debateResponse.getConsensus();
-            if (consensus != null) {
-                System.out.println(BOLD + "\u001B[38;2;255;215;0m" + "  ╔══════════════════════════════════════════════════════════╗" + RESET);
-                System.out.println(BOLD + "\u001B[38;2;255;215;0m" + "  ║  CONSENSUS                                               ║" + RESET);
-                System.out.println(BOLD + "\u001B[38;2;255;215;0m" + "  ╚══════════════════════════════════════════════════════════╝" + RESET);
-                System.out.println();
-
-                Map<String, Integer> votes = consensus.getVotes();
-                int total = consensus.getTotal();
-                int approve = votes.getOrDefault("approve", 0);
-                int conditional = votes.getOrDefault("conditional", 0);
-                int reject = votes.getOrDefault("reject", 0);
-
-                // Progress bar
-                int barLen = 40;
-                int greenLen = total > 0 ? (approve * barLen / total) : 0;
-                int yellowLen = total > 0 ? (conditional * barLen / total) : 0;
-                int redLen = barLen - greenLen - yellowLen;
-                String bar = "\u001B[42m" + " ".repeat(greenLen) + "\u001B[43m" + " ".repeat(yellowLen) + "\u001B[41m" + " ".repeat(redLen) + RESET;
-                System.out.println("  " + bar);
-                System.out.printf("  \u001B[32m%d APPROVE\u001B[0m  \u001B[33m%d CONDITIONAL\u001B[0m  \u001B[91m%d REJECT\u001B[0m  (of %d)%n", approve, conditional, reject, total);
-
-                String levelColor = switch (consensus.getLevel()) {
-                    case "unanimous" -> "\u001B[32m";
-                    case "strong" -> "\u001B[32m";
-                    case "majority" -> "\u001B[33m";
-                    default -> "\u001B[91m";
-                };
-                System.out.println("  Level: " + levelColor + BOLD + consensus.getLevel().toUpperCase() + RESET);
-                System.out.println();
-            }
-
-            // Save debate results for later use with create --from-debate
-            String debateJson = gson.toJson(debateResponse);
-            Path debateFile = Path.of(System.getProperty("user.home"), ".cortex", "last-debate.json");
-            Files.createDirectories(debateFile.getParent());
-            Files.writeString(debateFile, response.body());
-            System.out.println("  " + DIM + "Debate saved. Use 'create --from-debate' to generate code from this debate." + RESET);
-            System.out.println();
-
-            // Generate ADR if requested
-            if (adr && debateResponse.getRounds() != null) {
-                System.out.println(DIM + "  Generating ADR..." + RESET);
-
-                // Use the last round agents for the ADR summary
-                List<Agent> finalAgents = debateResponse.getRounds().get(debateResponse.getRounds().size() - 1).getAgents();
-                StringBuilder agentsSummary = new StringBuilder("[");
-                for (int i = 0; i < finalAgents.size(); i++) {
-                    Agent a = finalAgents.get(i);
-                    if (i > 0) agentsSummary.append(",");
-                    Map<String, String> agentMap = new HashMap<>();
-                    agentMap.put("name", a.getName());
-                    agentMap.put("role", a.getRole());
-                    agentMap.put("stance", a.getVote() != null ? a.getVote() : "---");
-                    agentMap.put("argument", a.getArgument());
-                    agentsSummary.append(gson.toJson(agentMap));
-                }
-                agentsSummary.append("]");
-
-                Map<String, Object> adrBodyMap = new HashMap<>();
-                adrBodyMap.put("topic", topic);
-                adrBodyMap.put("lang", lang);
-                adrBodyMap.put("agents", gson.fromJson(agentsSummary.toString(), Object.class));
-                String adrBody = gson.toJson(adrBodyMap);
-
-                HttpRequest adrRequest = HttpRequest.newBuilder()
-                        .uri(URI.create(server + "/generate-adr"))
-                        .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString(adrBody))
-                        .build();
-                HttpResponse<String> adrResponse = client.send(adrRequest, HttpResponse.BodyHandlers.ofString());
-                JsonObject adrJson = gson.fromJson(adrResponse.body(), JsonObject.class);
-                String adrContent = adrJson.get("adr").getAsString();
-                System.out.println();
-                System.out.println(adrContent);
-
-                if (project != null) {
-                    Path decisionsDir = Path.of(project, ".architect", "decisions");
-                    Files.createDirectories(decisionsDir);
-                    Files.writeString(decisionsDir.resolve("ADR-001.md"), adrContent);
-                    System.out.println("\n\u001B[32m  ADR saved to: " + decisionsDir.resolve("ADR-001.md") + RESET);
-                }
-            }
+            reader.close();
 
         } catch (IOException | InterruptedException e) {
             System.out.println("\u001B[91m  Error: Could not connect to AI service. Is it running on port 8000?" + RESET);
