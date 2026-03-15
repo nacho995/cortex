@@ -108,6 +108,9 @@ async def _call_anthropic(
                 if response.status_code == 429:
                     await asyncio.sleep((attempt + 1) * 5)
                     continue
+                if response.status_code != 200:
+                    error_body = response.text
+                    print(f"[ANTHROPIC ERROR] Status: {response.status_code}, Body: {error_body[:500]}")
                 response.raise_for_status()
                 data = response.json()
                 return data["content"][0]["text"]
@@ -219,6 +222,9 @@ async def _stream_anthropic(url, key, model, system, user_message, temperature, 
             },
             timeout=timeout,
         ) as response:
+            if response.status_code != 200:
+                error_body = await response.aread()
+                print(f"[ANTHROPIC STREAM ERROR] Status: {response.status_code}, Body: {error_body.decode()[:500]}")
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if line.startswith("data: "):

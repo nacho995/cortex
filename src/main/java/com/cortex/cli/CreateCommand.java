@@ -33,7 +33,7 @@ public class CreateCommand implements Runnable {
     private String apiKey;
     @Option(names = {"--model"}, description = "Model to use (e.g. gpt-4o, gpt-4o-mini)")
     private String model;
-    @Parameters(index = "0", description = "What to build (e.g. 'todo app with Spring Boot')")
+    @Parameters(index = "0", description = "What to build", defaultValue = "")
     private String prompt;
 
     private static final String RESET = "\u001B[0m";
@@ -72,6 +72,13 @@ public class CreateCommand implements Runnable {
                 } else {
                     System.out.println(YELLOW + "  Warning: No previous debate found. Run 'debate' first." + RESET);
                 }
+            }
+
+            if (prompt.isEmpty() && fromDebate) {
+                prompt = "Implement the project based on the debate conclusions";
+            } else if (prompt.isEmpty()) {
+                System.out.println("\u001B[91m  Error: Provide a description. Example: create \"todo app with MERN\"" + RESET);
+                return;
             }
 
             bodyMap.put("provider", provider);
